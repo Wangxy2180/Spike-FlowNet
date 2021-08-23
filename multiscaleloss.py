@@ -7,8 +7,11 @@ import torch.nn as nn
 """
 Robust Charbonnier loss.
 """
+
+
 def charbonnier_loss(delta, alpha=0.45, epsilon=1e-3):
-    loss = torch.sum(torch.pow(torch.mul(delta,delta) + torch.mul(epsilon,epsilon), alpha))
+    # alpha is r in paper; epsilon is eta
+    loss = torch.sum(torch.pow(torch.mul(delta, delta) + torch.mul(epsilon, epsilon), alpha))
     return loss
 
 
@@ -16,11 +19,17 @@ def charbonnier_loss(delta, alpha=0.45, epsilon=1e-3):
 warp an image/tensor (im2) back to im1, according to the optical flow
 x: [B, C, H, W] (im2), flo: [B, 2, H, W] flow
 """
+
+
+# next_img flow
+# 按论文里说的，他是用预测光流，将第二张图恢复到第一张图
 def warp(x, flo):
     B, C, H, W = x.size()
     # mesh grid
+    # xx yy 256*256
     xx = torch.arange(0, W).view(1, -1).repeat(H, 1)
     yy = torch.arange(0, H).view(-1, 1).repeat(1, W)
+    # xx yy 8*1*256*256
     xx = xx.view(1, 1, H, W).repeat(B, 1, 1, 1)
     yy = yy.view(1, 1, H, W).repeat(B, 1, 1, 1)
     grid = torch.cat((xx, yy), 1).float()
@@ -47,41 +56,61 @@ def warp(x, flo):
 """
 Multi-scale photometric loss, as defined in equation (3) of the paper.
 """
+
+
 def compute_photometric_loss(prev_images_temp, next_images_temp, event_images, output, weights=None):
+    # size is
+    # prev_images_tmp: 8*256*256
+    # next_images_tmp: 8*256*256
+    # event_images:    8*4*256*256
+    # output:          tuple(8*2*256*256,8*2*128*128,8*2*64*64,8*2*32*32)
+
     prev_images = np.array(prev_images_temp)
     next_images = np.array(next_images_temp)
 
     total_photometric_loss = 0.
     loss_weight_sum = 0.
 
+    # 256 128 64 32 四个尺寸都计算一遍
     for i in range(len(output)):
         flow = output[i]
 
-        m_batch = flow.size(0)
-        height = flow.size(2)
-        width = flow.size(3)
+        m_batch = flow.size(0)  # 8
+        height = flow.size(2)  # 256
+        width = flow.size(3)  # 256
 
         prev_images_resize = torch.zeros(m_batch, 1, height, width)
         next_images_resize = torch.zeros(m_batch, 1, height, width)
 
         for p in range(m_batch):
-            prev_images_resize[p,0,:,:] = torch.from_numpy(cv2.resize(prev_images[p,:,:], (height, width), interpolation=cv2.INTER_LINEAR))
-            next_images_resize[p,0,:,:] = torch.from_numpy(cv2.resize(next_images[p,:,:], (height, width), interpolation=cv2.INTER_LINEAR))
+            # 这里有必要resize吗，两个应该是相同大小的啊。不同！！！，这里的宽高是flow的宽高，不一定是256*256
+            prev_images_resize[p, 0, :, :] = torch.from_numpy(
+                cv2.resize(prev_images[p, :, :], (height, width), interpolation=cv2.INTER_LINEAR))
+            next_images_resize[p, 0, :, :] = torch.from_numpy(
+                cv2.resize(next_images[p, :, :], (height, width), interpolation=cv2.INTER_LINEAR))
 
+        # 根据光流，将第二张图反推，得到第一张图，然后和原始的第一张图做比较
         next_images_warped = warp(next_images_resize.cuda(), flow.cuda())
+        # 得到灰度值差
         error_temp = next_images_warped - prev_images_resize.cuda()
+        # charbonnier损失
         photometric_loss = charbonnier_loss(error_temp)
 
-        total_photometric_loss += weights[len(weights)-i-1]*photometric_loss
+        # 对不同的尺寸赋予不同的权重，但是这里都是的weights都是1
+        total_photometric_loss += weights[len(weights) - i - 1] * photometric_loss
         loss_weight_sum += 1.
-
+    # 最后再求个平均
     total_photometric_loss = total_photometric_loss / loss_weight_sum
 
     return total_photometric_loss
 
-
+# BCHW
+# pred_map tuple(8*2*256*256,8*2*128*128,8*2*64*64,8*2*32*32)
 def smooth_loss(pred_map):
+    # pred 8*2*256*256 etc
     def gradient(pred):
+        # 1: 从第一个开始，直到最后； :-1，从第0个开始，直到最后一个(不含)
+        # D_dy(行少1)是行相减，D_dx(列少1)是列之间相减
         D_dy = pred[:, :, 1:] - pred[:, :, :-1]
         D_dx = pred[:, :, :, 1:] - pred[:, :, :, :-1]
         return D_dx, D_dy
@@ -92,11 +121,12 @@ def smooth_loss(pred_map):
     loss = 0
     weight = 1.
 
+    # 这里的权重是变化的，尺寸从大到小，每次权重减少一半
     for scaled_map in pred_map:
         dx, dy = gradient(scaled_map)
         dx2, dxdy = gradient(dx)
         dydx, dy2 = gradient(dy)
-        loss += (dx2.abs().mean() + dxdy.abs().mean() + dydx.abs().mean() + dy2.abs().mean())*weight
+        loss += (dx2.abs().mean() + dxdy.abs().mean() + dydx.abs().mean() + dy2.abs().mean()) * weight
         weight /= 2.0
     return loss
 
@@ -104,6 +134,8 @@ def smooth_loss(pred_map):
 """
 Calculates per pixel flow error between flow_pred and flow_gt. event_img is used to mask out any pixels without events
 """
+
+
 def flow_error_dense(flow_gt, flow_pred, event_img, is_car=False):
     max_row = flow_gt.shape[1]
     if is_car == True:
@@ -119,7 +151,8 @@ def flow_error_dense(flow_gt, flow_pred, event_img, is_car=False):
     event_mask = event_img_cropped > 0
 
     # Only compute error over points that are valid in the GT (not inf or 0).
-    flow_mask = np.logical_and(np.logical_and(~np.isinf(flow_gt_cropped[:, :, 0]), ~np.isinf(flow_gt_cropped[:, :, 1])), np.linalg.norm(flow_gt_cropped, axis=2) > 0)
+    flow_mask = np.logical_and(np.logical_and(~np.isinf(flow_gt_cropped[:, :, 0]), ~np.isinf(flow_gt_cropped[:, :, 1])),
+                               np.linalg.norm(flow_gt_cropped, axis=2) > 0)
     total_mask = np.squeeze(np.logical_and(event_mask, flow_mask))
 
     gt_masked = flow_gt_cropped[total_mask, :]
@@ -155,6 +188,8 @@ def flow_error_dense(flow_gt, flow_pred, event_img, is_car=False):
 
 """Propagates x_indices and y_indices by their flow, as defined in x_flow, y_flow. x_mask and y_mask are zeroed out at each pixel where the indices leave the image.
 The optional scale_factor will scale the final displacement."""
+
+
 def prop_flow(x_flow, y_flow, x_indices, y_indices, x_mask, y_mask, scale_factor=1.0):
     flow_x_interp = cv2.remap(x_flow, x_indices, y_indices, cv2.INTER_NEAREST)
     flow_y_interp = cv2.remap(y_flow, x_indices, y_indices, cv2.INTER_NEAREST)
@@ -180,6 +215,8 @@ Note that this is flow in terms of pixel displacement, with units of pixels, not
 Inputs:
   x_flow_in, y_flow_in - list of numpy arrays, each array corresponds to per pixel flow at each timestamp.
   gt_timestamps - timestamp for each flow array.  start_time, end_time - gt flow will be estimated between start_time and end time."""
+
+
 def estimate_corresponding_gt_flow(x_flow_in, y_flow_in, gt_timestamps, start_time, end_time):
     x_flow_in = np.array(x_flow_in, dtype=np.float64)
     y_flow_in = np.array(y_flow_in, dtype=np.float64)
@@ -197,7 +234,7 @@ def estimate_corresponding_gt_flow(x_flow_in, y_flow_in, gt_timestamps, start_ti
 
     # No need to propagate if the desired dt is shorter than the time between gt timestamps.
     if gt_dt > dt:
-        return x_flow*dt/gt_dt, y_flow*dt/gt_dt
+        return x_flow * dt / gt_dt, y_flow * dt / gt_dt
 
     x_indices, y_indices = np.meshgrid(np.arange(x_flow.shape[1]), np.arange(x_flow.shape[0]))
     x_indices = x_indices.astype(np.float32)

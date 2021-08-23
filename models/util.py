@@ -60,7 +60,7 @@ def deconv(batchNorm, in_planes, out_planes):
             nn.ConvTranspose2d(in_planes, out_planes, kernel_size=4, stride=2, padding=1, bias=False),
             nn.LeakyReLU(0.1, inplace=True))
 
-
+# 一共4维，这里只判断后两维是否一致
 def crop_like(input, target):
     if input.size()[2:] == target.size()[2:]:
         return input

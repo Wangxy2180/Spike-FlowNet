@@ -283,8 +283,7 @@ def train(train_loader, model, optimizer, epoch, train_writer):
             # input torch.Size([8, 4, 256, 256, 5])
             input_representation = torch.zeros(former_inputs_on.size(0), batch_size_v, image_resize, image_resize,
                                                former_inputs_on.size(3)).float()
-            # print('size and shape:',former_inputs_on.shape,former_inputs_on.size())
-            # print('input',input_representation.shape)
+
             # 所谓4通道
             for b in range(batch_size_v):
                 if b == 0:
@@ -303,6 +302,8 @@ def train(train_loader, model, optimizer, epoch, train_writer):
             input_representation = input_representation.to(device)
             # print('hhh')
             # 执行20次NNforward，
+            # 输出是flow1 ~ flow4
+            # output tuple(8*2*256*256,8*2*128*128,8*2*64*64,8*2*32*32)
             output = model(input_representation.type(torch.cuda.FloatTensor), image_resize, sp_threshold)
             # print('jjj')
 
@@ -317,6 +318,10 @@ def train(train_loader, model, optimizer, epoch, train_writer):
             # total_loss
             loss = photometric_loss + 10 * smoothness_loss
 
+            # 这块已经看不懂了
+            # 先将梯度归零（optimizer.zero_grad()），
+            # 然后反向传播计算得到每个参数的梯度值（loss.backward()），
+            # 最后通过梯度下降执行一步参数更新（optimizer.step()）
             # compute gradient and do optimization step
             optimizer.zero_grad()
             # 15次backward
