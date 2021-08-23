@@ -1,4 +1,5 @@
 import argparse
+import sys
 import time
 import torch
 import torch.nn.parallel
@@ -32,8 +33,8 @@ parser.add_argument('--savedir', type=str, metavar='DATASET', default='spikeflow
 parser.add_argument('--arch', '-a', metavar='ARCH', default='spike_flownets',
                     choices=model_names,
                     help='model architecture, overwritten if pretrained is specified: ' +
-                    ' | '.join(model_names))
-parser.add_argument('--solver', default='adam',choices=['adam','sgd'],
+                         ' | '.join(model_names))
+parser.add_argument('--solver', default='adam', choices=['adam', 'sgd'],
                     help='solver algorithms')
 parser.add_argument('-j', '--workers', default=8, type=int, metavar='N',
                     help='number of data loading workers')
@@ -70,12 +71,13 @@ parser.add_argument('--no-date', action='store_true',
                     help='don\'t append date timestamp to folder')
 parser.add_argument('--div-flow', default=1,
                     help='value by which flow will be divided. Original value is 20 but 1 with batchNorm gives good results')
-parser.add_argument('--milestones', default=[5,10,20,30,40,50,70,90,110,130,150,170], metavar='N', nargs='*', help='epochs at which learning rate is divided by 2')
+parser.add_argument('--milestones', default=[5, 10, 20, 30, 40, 50, 70, 90, 110, 130, 150, 170], metavar='N', nargs='*',
+                    help='epochs at which learning rate is divided by 2')
 parser.add_argument('--render', dest='render', action='store_true',
                     help='evaluate model on validation set')
 args = parser.parse_args()
 
-#Initializations
+# Initializations
 best_EPE = -1
 n_iter = 0
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -84,8 +86,10 @@ event_interval = 0
 spiking_ts = 1
 sp_threshold = 0
 
-trainenv = 'outdoor_day2'
-testenv = 'indoor_flying1'
+# trainenv = 'outdoor_day2'
+trainenv = 'indoor_flying4'
+# testenv = 'indoor_flying1'
+testenv = 'indoor_flying4'
 
 traindir = os.path.join(args.data, trainenv)
 testdir = os.path.join(args.data, testenv)
@@ -103,7 +107,7 @@ class Train_loading(Dataset):
         # Training input data, label parse
         self.dt = 1
         self.split = 10
-        self.half_split = int(self.split/2)
+        self.half_split = int(self.split / 2)
         self.x = 260
         self.y = 346
 
@@ -121,30 +125,33 @@ class Train_loading(Dataset):
             cc = np.zeros((self.x, self.y, self.half_split), dtype=np.uint8)
             dd = np.zeros((self.x, self.y, self.half_split), dtype=np.uint8)
 
-            im_onoff = np.load(traindir + '/count_data/' + str(int(index+1))+'.npy')
+            im_onoff = np.load(traindir + '/count_data/' + str(int(index + 1)) + '.npy')
 
             aa[:, :, :] = im_onoff[0, :, :, 0:5]
             bb[:, :, :] = im_onoff[1, :, :, 0:5]
             cc[:, :, :] = im_onoff[0, :, :, 5:10]
             dd[:, :, :] = im_onoff[1, :, :, 5:10]
 
-            ee = np.uint8(np.load(traindir + '/gray_data/' + str(int(index))+'.npy'))
-            ff = np.uint8(np.load(traindir + '/gray_data/' + str(int(index+self.dt))+'.npy'))
+            ee = np.uint8(np.load(traindir + '/gray_data/' + str(int(index)) + '.npy'))
+            ff = np.uint8(np.load(traindir + '/gray_data/' + str(int(index + self.dt)) + '.npy'))
 
             if self.transform:
                 seed = np.random.randint(2147483647)
 
-                aaa = torch.zeros(256,256,int(aa.shape[2]))
-                bbb = torch.zeros(256,256,int(bb.shape[2]))
-                ccc = torch.zeros(256,256,int(cc.shape[2]))
-                ddd = torch.zeros(256,256,int(dd.shape[2]))
+                aaa = torch.zeros(256, 256, int(aa.shape[2]))
+                bbb = torch.zeros(256, 256, int(bb.shape[2]))
+                ccc = torch.zeros(256, 256, int(cc.shape[2]))
+                ddd = torch.zeros(256, 256, int(dd.shape[2]))
 
-                for p in range(int(self.split/2*self.dt)):
+                # range(5)
+                for p in range(int(self.split / 2 * self.dt)):
+                    # 这样可以保证同一批次中的每一个的结果都一样吗？
                     # fix the data transformation
                     random.seed(seed)
                     torch.manual_seed(seed)
                     scale_a = aa[:, :, p].max()
                     aaa[:, :, p] = self.transform(aa[:, :, p])
+                    # 这个是干嘛呢
                     if torch.max(aaa[:, :, p]) > 0:
                         aaa[:, :, p] = scale_a * aaa[:, :, p] / torch.max(aaa[:, :, p])
 
@@ -182,14 +189,19 @@ class Train_loading(Dataset):
                 torch.manual_seed(seed)
                 ff = self.transform(ff)
 
-            if torch.max(aaa)>0 and torch.max(bbb)>0 and torch.max(ccc)>0 and torch.max(ddd)>0 and torch.max(ee)>0 and torch.max(ff)>0:
-                return aaa, bbb, ccc, ddd, ee/torch.max(ee), ff/torch.max(ff)
+            # 这都是啥
+            if torch.max(aaa) > 0 and torch.max(bbb) > 0 and torch.max(ccc) > 0 and torch.max(ddd) > 0 and torch.max(
+                    ee) > 0 and torch.max(ff) > 0:
+
+                return aaa, bbb, ccc, ddd, ee / torch.max(ee), ff / torch.max(ff)
             else:
-                pp = torch.zeros(image_resize,image_resize,self.half_split)
-                return pp, pp, pp, pp, torch.zeros(1, image_resize, image_resize), torch.zeros(1, image_resize, image_resize)
+                pp = torch.zeros(image_resize, image_resize, self.half_split)
+                return pp, pp, pp, pp, torch.zeros(1, image_resize, image_resize), torch.zeros(1, image_resize,
+                                                                                               image_resize)
         else:
-            pp = torch.zeros(image_resize,image_resize,self.half_split)
-            return pp, pp, pp, pp, torch.zeros(1, image_resize, image_resize), torch.zeros(1, image_resize, image_resize)
+            pp = torch.zeros(image_resize, image_resize, self.half_split)
+            return pp, pp, pp, pp, torch.zeros(1, image_resize, image_resize), torch.zeros(1, image_resize,
+                                                                                           image_resize)
 
     def __len__(self):
         return self.length
@@ -204,31 +216,42 @@ class Test_loading(Dataset):
         self.split = 10
         self.half_split = int(self.split / 2)
 
+        # testfile:datasets/indoor_flying4/indoor_flying4_datahdf5
         d_set = h5py.File(testfile, 'r')
-        
+
         # Training input data, label parse
+        # ts size is 623
         self.image_raw_ts = np.float64(d_set['davis']['left']['image_raw_ts'])
         self.length = d_set['davis']['left']['image_raw'].shape[0]
         d_set = None
 
     def __getitem__(self, index):
+        # 这四个对应
+        # former_inputs_on, former_inputs_off, latter_inputs_on, latter_inputs_off
+        # 这个20又是什么道理呢？
         if (index + 20 < self.length) and (index > 20):
+            # 256,256,5
             aa = np.zeros((256, 256, self.half_split), dtype=np.uint8)
             bb = np.zeros((256, 256, self.half_split), dtype=np.uint8)
             cc = np.zeros((256, 256, self.half_split), dtype=np.uint8)
             dd = np.zeros((256, 256, self.half_split), dtype=np.uint8)
 
             im_onoff = np.load(testdir + '/count_data/' + str(int(index + 1)) + '.npy')
+            # print("im_onoff",im_onoff.shape)
 
+            # 2, 260 346 10
+            # 260-2-2=256 346-45-45=256
+            # 也就是说他不是resize的，而是直接剪裁的
             aa[:, :, :] = im_onoff[0, self.yoff:-self.yoff, self.xoff:-self.xoff, 0:5].astype(float)
             bb[:, :, :] = im_onoff[1, self.yoff:-self.yoff, self.xoff:-self.xoff, 0:5].astype(float)
             cc[:, :, :] = im_onoff[0, self.yoff:-self.yoff, self.xoff:-self.xoff, 5:10].astype(float)
             dd[:, :, :] = im_onoff[1, self.yoff:-self.yoff, self.xoff:-self.xoff, 5:10].astype(float)
 
-            return aa, bb, cc, dd, self.image_raw_ts[index], self.image_raw_ts[index+self.dt]
+            return aa, bb, cc, dd, self.image_raw_ts[index], self.image_raw_ts[index + self.dt]
         else:
-            pp = np.zeros((image_resize,image_resize,self.half_split))
-            return pp, pp, pp, pp, np.zeros((self.image_raw_ts[index].shape)), np.zeros((self.image_raw_ts[index].shape))
+            pp = np.zeros((image_resize, image_resize, self.half_split))
+            return pp, pp, pp, pp, np.zeros((self.image_raw_ts[index].shape)), np.zeros(
+                (self.image_raw_ts[index].shape))
 
     def __len__(self):
         return self.length
@@ -244,17 +267,25 @@ def train(train_loader, model, optimizer, epoch, train_writer):
     # switch to train mode
     model.train()
     end = time.time()
+    # batch_size is 8
     mini_batch_size_v = args.batch_size
     batch_size_v = 4
     sp_threshold = 0.75
 
     for ww, data in enumerate(train_loader, 0):
         # get the inputs
+        # 前四个8*256*256*5  后两个8*1*256*256
+        # ?为啥会多了一维呢，8是哪来的，batch是8，但是这里还没开始训练额啊
         former_inputs_on, former_inputs_off, latter_inputs_on, latter_inputs_off, former_gray, latter_gray = data
 
+        # 两张灰度图之间有事件，才进行操作
         if torch.sum(former_inputs_on + former_inputs_off) > 0:
-            input_representation = torch.zeros(former_inputs_on.size(0), batch_size_v, image_resize, image_resize, former_inputs_on.size(3)).float()
-
+            # input torch.Size([8, 4, 256, 256, 5])
+            input_representation = torch.zeros(former_inputs_on.size(0), batch_size_v, image_resize, image_resize,
+                                               former_inputs_on.size(3)).float()
+            # print('size and shape:',former_inputs_on.shape,former_inputs_on.size())
+            # print('input',input_representation.shape)
+            # 所谓4通道
             for b in range(batch_size_v):
                 if b == 0:
                     input_representation[:, 0, :, :, :] = former_inputs_on
@@ -270,19 +301,25 @@ def train(train_loader, model, optimizer, epoch, train_writer):
 
             # compute output
             input_representation = input_representation.to(device)
+            # print('hhh')
+            # 执行20次NNforward，
             output = model(input_representation.type(torch.cuda.FloatTensor), image_resize, sp_threshold)
+            # print('jjj')
 
             # Photometric loss.
-            photometric_loss = compute_photometric_loss(former_gray[:, 0, :, :], latter_gray[:, 0, :, :], torch.sum(input_representation, 4), output, weights=args.multiscale_weights)
+            photometric_loss = compute_photometric_loss(former_gray[:, 0, :, :], latter_gray[:, 0, :, :],
+                                                        torch.sum(input_representation, 4), output,
+                                                        weights=args.multiscale_weights)
 
             # Smoothness loss.
             smoothness_loss = smooth_loss(output)
 
             # total_loss
-            loss = photometric_loss + 10*smoothness_loss
+            loss = photometric_loss + 10 * smoothness_loss
 
             # compute gradient and do optimization step
             optimizer.zero_grad()
+            # 15次backward
             loss.backward()
             optimizer.step()
 
@@ -294,9 +331,10 @@ def train(train_loader, model, optimizer, epoch, train_writer):
             batch_time.update(time.time() - end)
             end = time.time()
 
-            if mini_batch_size_v*ww % args.print_freq < mini_batch_size_v:
+            if mini_batch_size_v * ww % args.print_freq < mini_batch_size_v:
                 print('Epoch: [{0}][{1}/{2}]\t Time {3}\t Data {4}\t Loss {5}'
-                      .format(epoch, mini_batch_size_v*ww, mini_batch_size_v*len(train_loader), batch_time, data_time, losses))
+                      .format(epoch, mini_batch_size_v * ww, mini_batch_size_v * len(train_loader), batch_time,
+                              data_time, losses))
             n_iter += 1
 
     return losses.avg
@@ -308,7 +346,7 @@ def validate(test_loader, model, epoch, output_writers):
     gt_temp = np.float32(d_label['davis']['left']['flow_dist'])
     gt_ts_temp = np.float64(d_label['davis']['left']['flow_dist_ts'])
     d_label = None
-    
+
     d_set = h5py.File(testfile, 'r')
     gray_image = d_set['davis']['left']['image_raw']
 
@@ -329,12 +367,14 @@ def validate(test_loader, model, epoch, output_writers):
     iters = 0.
     scale = 1
 
+    # 0 is start location
     for i, data in enumerate(test_loader, 0):
         former_inputs_on, former_inputs_off, latter_inputs_on, latter_inputs_off, st_time, ed_time = data
 
         if torch.sum(former_inputs_on + former_inputs_off) > 0:
-            input_representation = torch.zeros(former_inputs_on.size(0), batch_size_v, image_resize, image_resize, former_inputs_on.size(3)).float()
-
+            input_representation = torch.zeros(former_inputs_on.size(0), batch_size_v, image_resize, image_resize,
+                                               former_inputs_on.size(3)).float()
+            # 所谓4通道
             for b in range(batch_size_v):
                 if b == 0:
                     input_representation[:, 0, :, :, :] = former_inputs_on
@@ -348,60 +388,77 @@ def validate(test_loader, model, epoch, output_writers):
             # compute output
             input_representation = input_representation.to(device)
             output = model(input_representation.type(torch.cuda.FloatTensor), image_resize, sp_threshold)
-
+            # output is torch.Size([1, 2, 256, 256])
             # pred_flow = output
             pred_flow = np.zeros((image_resize, image_resize, 2))
             output_temp = output.cpu()
-            pred_flow[:, :, 0] = cv2.resize(np.array(output_temp[0, 0, :, :]), (image_resize, image_resize), interpolation=cv2.INTER_LINEAR)
-            pred_flow[:, :, 1] = cv2.resize(np.array(output_temp[0, 1, :, :]), (image_resize, image_resize), interpolation=cv2.INTER_LINEAR)
-
+            pred_flow[:, :, 0] = cv2.resize(np.array(output_temp[0, 0, :, :]), (image_resize, image_resize),
+                                            interpolation=cv2.INTER_LINEAR)
+            pred_flow[:, :, 1] = cv2.resize(np.array(output_temp[0, 1, :, :]), (image_resize, image_resize),
+                                            interpolation=cv2.INTER_LINEAR)
+            # u v is x y direction
             U_gt_all = np.array(gt_temp[:, 0, :, :])
             V_gt_all = np.array(gt_temp[:, 1, :, :])
 
-            U_gt, V_gt = estimate_corresponding_gt_flow(U_gt_all, V_gt_all, gt_ts_temp, np.array(st_time), np.array(ed_time))
+            U_gt, V_gt = estimate_corresponding_gt_flow(U_gt_all, V_gt_all, gt_ts_temp, np.array(st_time),
+                                                        np.array(ed_time))
             gt_flow = np.stack((U_gt, V_gt), axis=2)
 
             #   ----------- Visualization
             if epoch < 0:
+                # 1 256 256 5 mask_temp
                 mask_temp = former_inputs_on + former_inputs_off + latter_inputs_on + latter_inputs_off
                 mask_temp = torch.sum(torch.sum(mask_temp, 0), 2)
                 mask_temp_np = np.squeeze(np.array(mask_temp)) > 0
-                
+
+                # 所谓spike_image，就是指在两张灰度图之间，出现事件，那就认为他是spike
                 spike_image = mask_temp
-                spike_image[spike_image>0] = 255
+                spike_image[spike_image > 0] = 255
+                # spike_image.shape 256*256
                 if args.render:
                     cv2.imshow('Spike Image', np.array(spike_image, dtype=np.uint8))
-                
-                gray = cv2.resize(gray_image[i], (scale*image_resize,scale* image_resize), interpolation=cv2.INTER_LINEAR)
+
+                gray = cv2.resize(gray_image[i], (scale * image_resize, scale * image_resize),
+                                  interpolation=cv2.INTER_LINEAR)
                 if args.render:
                     cv2.imshow('Gray Image', cv2.cvtColor(gray, cv2.COLOR_BGR2RGB))
 
                 out_temp = np.array(output_temp.cpu().detach())
-                x_flow = cv2.resize(np.array(out_temp[0, 0, :, :]), (scale * image_resize, scale * image_resize), interpolation=cv2.INTER_LINEAR)
-                y_flow = cv2.resize(np.array(out_temp[0, 1, :, :]), (scale * image_resize, scale * image_resize), interpolation=cv2.INTER_LINEAR)
+                x_flow = cv2.resize(np.array(out_temp[0, 0, :, :]), (scale * image_resize, scale * image_resize),
+                                    interpolation=cv2.INTER_LINEAR)
+                y_flow = cv2.resize(np.array(out_temp[0, 1, :, :]), (scale * image_resize, scale * image_resize),
+                                    interpolation=cv2.INTER_LINEAR)
                 flow_rgb = flow_viz_np(x_flow, y_flow)
                 if args.render:
                     cv2.imshow('Predicted Flow Output', cv2.cvtColor(flow_rgb, cv2.COLOR_BGR2RGB))
 
-                gt_flow_x = cv2.resize(gt_flow[:, :, 0], (scale * image_resize, scale * image_resize),interpolation=cv2.INTER_LINEAR)
-                gt_flow_y = cv2.resize(gt_flow[:, :, 1], (scale * image_resize, scale * image_resize),interpolation=cv2.INTER_LINEAR)
+                gt_flow_x = cv2.resize(gt_flow[:, :, 0], (scale * image_resize, scale * image_resize),
+                                       interpolation=cv2.INTER_LINEAR)
+                gt_flow_y = cv2.resize(gt_flow[:, :, 1], (scale * image_resize, scale * image_resize),
+                                       interpolation=cv2.INTER_LINEAR)
                 gt_flow_large = flow_viz_np(gt_flow_x, gt_flow_y)
                 if args.render:
                     cv2.imshow('GT Flow', cv2.cvtColor(gt_flow_large, cv2.COLOR_BGR2RGB))
-                
-                masked_x_flow = cv2.resize(np.array(out_temp[0, 0, :, :] * mask_temp_np), (scale*image_resize,scale* image_resize), interpolation=cv2.INTER_LINEAR)
-                masked_y_flow = cv2.resize(np.array(out_temp[0, 1, :, :] * mask_temp_np), (scale*image_resize, scale*image_resize), interpolation=cv2.INTER_LINEAR)
+
+                masked_x_flow = cv2.resize(np.array(out_temp[0, 0, :, :] * mask_temp_np),
+                                           (scale * image_resize, scale * image_resize), interpolation=cv2.INTER_LINEAR)
+                masked_y_flow = cv2.resize(np.array(out_temp[0, 1, :, :] * mask_temp_np),
+                                           (scale * image_resize, scale * image_resize), interpolation=cv2.INTER_LINEAR)
                 flow_rgb_masked = flow_viz_np(masked_x_flow, masked_y_flow)
                 if args.render:
                     cv2.imshow('Masked Predicted Flow', cv2.cvtColor(flow_rgb_masked, cv2.COLOR_BGR2RGB))
-                
+
                 gt_flow_cropped = gt_flow[2:-2, 45:-45]
-                gt_flow_masked_x = cv2.resize(gt_flow_cropped[:, :, 0]*mask_temp_np, (scale*image_resize, scale*image_resize),interpolation=cv2.INTER_LINEAR)
-                gt_flow_masked_y = cv2.resize(gt_flow_cropped[:, :, 1]*mask_temp_np, (scale*image_resize, scale*image_resize),interpolation=cv2.INTER_LINEAR)
+                gt_flow_masked_x = cv2.resize(gt_flow_cropped[:, :, 0] * mask_temp_np,
+                                              (scale * image_resize, scale * image_resize),
+                                              interpolation=cv2.INTER_LINEAR)
+                gt_flow_masked_y = cv2.resize(gt_flow_cropped[:, :, 1] * mask_temp_np,
+                                              (scale * image_resize, scale * image_resize),
+                                              interpolation=cv2.INTER_LINEAR)
                 gt_masked_flow = flow_viz_np(gt_flow_masked_x, gt_flow_masked_y)
                 if args.render:
                     cv2.imshow('GT Masked Flow', cv2.cvtColor(gt_masked_flow, cv2.COLOR_BGR2RGB))
-                
+
                 cv2.waitKey(1)
 
             image_size = pred_flow.shape
@@ -415,7 +472,8 @@ def validate(test_loader, model, epoch, output_writers):
 
             gt_flow = gt_flow[yoff:-yoff, xoff:-xoff, :]
 
-            AEE, percent_AEE, n_points, AEE_sum_temp, AEE_gt, AEE_sum_temp_gt = flow_error_dense(gt_flow, pred_flow, (torch.sum(torch.sum(torch.sum(input_representation, dim=0), dim=0), dim=2)).cpu(), is_car=False)
+            AEE, percent_AEE, n_points, AEE_sum_temp, AEE_gt, AEE_sum_temp_gt = flow_error_dense(gt_flow, pred_flow, (
+                torch.sum(torch.sum(torch.sum(input_representation, dim=0), dim=0), dim=2)).cpu(), is_car=False)
 
             AEE_sum = AEE_sum + args.div_flow * AEE
             AEE_sum_sum = AEE_sum_sum + AEE_sum_temp
@@ -425,7 +483,7 @@ def validate(test_loader, model, epoch, output_writers):
 
             percent_AEE_sum += percent_AEE
 
-             # measure elapsed time
+            # measure elapsed time
             batch_time.update(time.time() - end)
             end = time.time()
 
@@ -436,7 +494,8 @@ def validate(test_loader, model, epoch, output_writers):
 
     print('-------------------------------------------------------')
     print('Mean AEE: {:.2f}, sum AEE: {:.2f}, Mean AEE_gt: {:.2f}, sum AEE_gt: {:.2f}, mean %AEE: {:.2f}, # pts: {:.2f}'
-                  .format(AEE_sum / iters, AEE_sum_sum / iters, AEE_sum_gt / iters, AEE_sum_sum_gt / iters, percent_AEE_sum / iters, n_points))
+          .format(AEE_sum / iters, AEE_sum_sum / iters, AEE_sum_gt / iters, AEE_sum_sum_gt / iters,
+                  percent_AEE_sum / iters, n_points))
     print('-------------------------------------------------------')
     gt_temp = None
 
@@ -445,29 +504,34 @@ def validate(test_loader, model, epoch, output_writers):
 
 def main():
     global args, best_EPE, image_resize, event_interval, spiking_ts, device, sp_threshold
+    # spikeflownet, adam, 100epochs,epochSize800,8,5e-5
     save_path = '{},{},{}epochs{},b{},lr{}'.format(
         args.arch,
         args.solver,
         args.epochs,
-        ',epochSize'+str(args.epoch_size) if args.epoch_size > 0 else '',
+        ',epochSize' + str(args.epoch_size) if args.epoch_size > 0 else '',
         args.batch_size,
         args.lr)
+    # no_data: False for default
+    # 没啥特别的，就是用时间戳区分一下
     if not args.no_date:
         timestamp = datetime.datetime.now().strftime("%m-%d-%H:%M")
-        save_path = os.path.join(timestamp,save_path)
-    save_path = os.path.join(args.savedir,save_path)
+        save_path = os.path.join(timestamp, save_path)
+    save_path = os.path.join(args.savedir, save_path)
     print('=> Everything will be saved to {}'.format(save_path))
-    
+
     if not os.path.exists(save_path):
         os.makedirs(save_path)
 
-    train_writer = SummaryWriter(os.path.join(save_path,'train'))
-    test_writer = SummaryWriter(os.path.join(save_path,'test'))
+    # 这一步本质就是创建文件夹，后续会有更多操作
+    train_writer = SummaryWriter(os.path.join(save_path, 'train'))
+    test_writer = SummaryWriter(os.path.join(save_path, 'test'))
     output_writers = []
     for i in range(3):
-        output_writers.append(SummaryWriter(os.path.join(save_path,'test',str(i))))
+        output_writers.append(SummaryWriter(os.path.join(save_path, 'test', str(i))))
 
     # Data loading code
+    # torchvison.transforms
     co_transform = transforms.Compose([
         transforms.ToPILImage(),
         transforms.RandomHorizontalFlip(0.5),
@@ -477,46 +541,59 @@ def main():
         transforms.ToTensor(),
     ])
     Test_dataset = Test_loading()
+    # workers default is 8 make -j8的那个8，wnmd
     test_loader = DataLoader(dataset=Test_dataset,
-                              batch_size=1,
-                              shuffle=False,
-                              num_workers=args.workers)
+                             batch_size=1,
+                             shuffle=False,
+                             num_workers=args.workers)
 
     # create model
+    args.ptrtrained='./pretrain/checkpoint_dt1.pth.tar'
     if args.pretrained:
         network_data = torch.load(args.pretrained)
-        #args.arch = network_data['arch']
+        # args.arch = network_data['arch']
         print("=> using pre-trained model '{}'".format(args.arch))
     else:
         network_data = None
         print("=> creating model '{}'".format(args.arch))
 
+    # 这个操作没太看懂啊
+    # 就是spike_flownets,他调用了models中的spike_flownet函数，参数是network_data
+    # 改成下边哪行似乎也没差啊，他可能就是为了强行使用args.arch
     model = models.__dict__[args.arch](network_data).cuda()
+    # model = models.spike_flownets(network_data).cuda()
     model = torch.nn.DataParallel(model).cuda()
     cudnn.benchmark = True
 
-    assert(args.solver in ['adam', 'sgd'])
+    # sys.exit()
+
+    assert (args.solver in ['adam', 'sgd'])
     print('=> setting {} solver'.format(args.solver))
+    # 这两个参数也不对啊，真特么神奇啊，自己就变成下划线了
+    # print([k for k in model.named_parameters()])
     param_groups = [{'params': model.module.bias_parameters(), 'weight_decay': args.bias_decay},
                     {'params': model.module.weight_parameters(), 'weight_decay': args.weight_decay}]
     if args.solver == 'adam':
         optimizer = torch.optim.Adam(param_groups, args.lr, betas=(args.momentum, args.beta))
     elif args.solver == 'sgd':
         optimizer = torch.optim.SGD(param_groups, args.lr, momentum=args.momentum)
-
+    # sys.exit()
+    # args.evaluate = True
     if args.evaluate:
+        # 强制之后的内容不进行计算图构建，不追踪梯度
         with torch.no_grad():
             best_EPE = validate(test_loader, model, -1, output_writers)
         return
-
+    # ----------------------- line between train and test --------------------------------------------
     Train_dataset = Train_loading(transform=co_transform)
     train_loader = DataLoader(dataset=Train_dataset,
                               batch_size=args.batch_size,
                               shuffle=True,
                               num_workers=args.workers)
-
+    # 学习率调整
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones, gamma=0.7)
 
+    # range(0,100)
     for epoch in range(args.start_epoch, args.epochs):
         scheduler.step()
 
@@ -525,7 +602,7 @@ def main():
         train_writer.add_scalar('mean loss', train_loss, epoch)
 
         # Test at every 5 epoch during training
-        if (epoch + 1)%args.evaluate_interval == 0:
+        if (epoch + 1) % args.evaluate_interval == 0:
             # evaluate on validation set
             with torch.no_grad():
                 EPE = validate(test_loader, model, epoch, output_writers)
@@ -543,6 +620,7 @@ def main():
                 'best_EPE': best_EPE,
                 'div_flow': args.div_flow
             }, is_best, save_path)
+
 
 if __name__ == '__main__':
     main()

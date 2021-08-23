@@ -4,14 +4,17 @@ import math
 from torch.nn.init import kaiming_normal_, constant_
 from .util import predict_flow, crop_like, conv_s, conv, deconv
 __all__ = ['spike_flownets']
+# __all__,当被其他包导入时，只能使用这其中的成员,这个对应的就是那个函数
 
 
 class SpikingNN(torch.autograd.Function):
     def forward(self, input):
+        # print('nnfor')
         self.save_for_backward(input)
         return input.gt(1e-5).type(torch.cuda.FloatTensor)
 
     def backward(self, grad_output):
+        # print('nnbak')
         input, = self.saved_tensors
         grad_input = grad_output.clone()
         grad_input[input <= 1e-5] = 0
@@ -60,7 +63,10 @@ class FlowNetS_spike(nn.Module):
         self.upsampled_flow2_to_1 = nn.ConvTranspose2d(in_channels=192+2, out_channels=32, kernel_size=4, stride=2, padding=1, bias=False)
         self.upsampled_flow1_to_0 = nn.ConvTranspose2d(in_channels=68+2, out_channels=32, kernel_size=4, stride=2, padding=1, bias=False)
 
+
+        # 这是干嘛呢,而且这俩看上去一样啊
         for m in self.modules():
+            # print('modules',m)
             if isinstance(m, nn.Conv2d):
                 n = m.kernel_size[0] * m.kernel_size[1] * m.in_channels
                 variance1 = math.sqrt(3.0 / n)  # use 3 for dt1 and 2 for dt4
@@ -76,8 +82,10 @@ class FlowNetS_spike(nn.Module):
                     constant_(m.bias, 0)
 
     def forward(self, input, image_resize, sp_threshold):
+        print('fff')
         threshold = sp_threshold
-
+        # input ([8, 4, 256, 256, 5])
+        # image_resize is 256
         mem_1 = torch.zeros(input.size(0), 64, int(image_resize/2), int(image_resize/2)).cuda()
         mem_2 = torch.zeros(input.size(0), 128, int(image_resize/4), int(image_resize/4)).cuda()
         mem_3 = torch.zeros(input.size(0), 256, int(image_resize/8), int(image_resize/8)).cuda()
@@ -142,6 +150,7 @@ class FlowNetS_spike(nn.Module):
         concat1 = torch.cat((out_conv1,out_deconv1,flow2_up),1)
         flow1 = self.predict_flow1(self.upsampled_flow1_to_0(concat1))
 
+
         if self.training:
             return flow1,flow2,flow3,flow4
         else:
@@ -155,6 +164,7 @@ class FlowNetS_spike(nn.Module):
 
 
 def spike_flownets(data=None):
+    # data is network_data
     model = FlowNetS_spike(batchNorm=False)
     if data is not None:
         model.load_state_dict(data['state_dict'])
