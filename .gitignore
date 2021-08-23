@@ -1,2 +1,5 @@
 /datasets/indoor_flying4
 .idea/
+spikeflownet/
+__pycache__/
+models/__pycache__/
