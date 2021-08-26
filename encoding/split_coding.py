@@ -36,7 +36,7 @@ class Events(object):
         self.height = height
 
     def generate_fimage(self, input_event=0, gray=0, image_raw_event_inds_temp=0, image_raw_ts_temp=0, dt_time_temp=0):
-        print(image_raw_event_inds_temp.shape, image_raw_ts_temp.shape)
+        # print(image_raw_event_inds_temp.shape, image_raw_ts_temp.shape)
         # 623
         split_interval = image_raw_ts_temp.shape[0]
         # N is 5 *  group is 2
@@ -55,6 +55,8 @@ class Events(object):
                 # print(11111)
                 frame_data = input_event[0:image_raw_event_inds_temp[i + (dt_time_temp - 1)], :]
             else:
+                # image_raw_event_inds_temp 623张图片有623个时间间隔，存放当前时间间隔累加的事件数量
+                # 似乎下边都是从0开始的
                 # 第一次循环，这里绝对是错的，i-1是-1啊
                 # 简单的说，就是从上一帧的最后一个事件到现在这帧
                 # 但是这里时间并不是从第0个开始的，而是从第0个ind对应的事件开始的

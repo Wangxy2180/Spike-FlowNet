@@ -179,6 +179,8 @@ class Train_loading(Dataset):
                     if torch.max(ddd[:, :, p]) > 0:
                         ddd[:, :, p] = scale_d * ddd[:, :, p] / torch.max(ddd[:, :, p])
 
+                    # print('abcd',scale_a,scale_b,scale_c,scale_d)
+
                 # fix the data transformation
                 random.seed(seed)
                 torch.manual_seed(seed)
@@ -275,7 +277,7 @@ def train(train_loader, model, optimizer, epoch, train_writer):
     for ww, data in enumerate(train_loader, 0):
         # get the inputs
         # 前四个8*256*256*5  后两个8*1*256*256
-        # ?为啥会多了一维呢，8是哪来的，batch是8，但是这里还没开始训练额啊
+        # batch是8，在load时期设置的
         former_inputs_on, former_inputs_off, latter_inputs_on, latter_inputs_off, former_gray, latter_gray = data
 
         # 两张灰度图之间有事件，才进行操作

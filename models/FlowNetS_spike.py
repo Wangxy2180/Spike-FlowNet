@@ -15,12 +15,11 @@ class SpikingNN(torch.autograd.Function):
     def forward(self, input):
         # print('nnfor')
         self.save_for_backward(input)
-        # 大于为1，小于为0, 可以认为大于0的为1，否则为0
-        # ReLU求导
+        # 大于为1，小于为0, 可以认为大于0的为1，否则为0；ReLU求导？
         return input.gt(1e-5).type(torch.cuda.FloatTensor)
 
     def backward(self, grad_output):
-        print('nnbak')
+        # print('nnbak')
         input, = self.saved_tensors
         grad_input = grad_output.clone()
         grad_input[input <= 1e-5] = 0
@@ -28,26 +27,32 @@ class SpikingNN(torch.autograd.Function):
 
 
 # 这个就是IF模型
+# 更新膜电位，以及输出本层产生的脉冲
 # mem_1: 8 * x * image_resize/2 * image_resize/2
 def IF_Neuron(membrane_potential, threshold):
     global threshold_k
     threshold_k = threshold
     # check exceed membrane potential and reset
-    # 超出阈值的保持不变，未超出的置0
+    # threshold函数：超出阈值的保持不变，未超出的置0
+    # 这个ex不会就是所谓的脉冲吧
     ex_membrane = nn.functional.threshold(membrane_potential, threshold_k, 0)
-    # print("2 sum",torch.sum(membrane_potential),torch.sum(ex_membrane))
 
-    # 这是干嘛呢，这样一来不就翻转了吗，就是超出阈值的置0，不超出的则不变
+    # 这样一来就翻转了吗，就是超出阈值的reset 0，不超出的则不变
+    # 超出阈值的，产生脉冲的，同时膜电位reset 0
     membrane_potential = membrane_potential - ex_membrane  # hard reset
+
     # 他甚至会有很多负的
     # generate spike
-    # 超出0的置为1，反之置为0，看上去像是ReLU求导
+    # 用ex的值产生脉冲,超出0的置为1，反之置为0，因为ex是256*256的，有值的(就是膜电位超出阈值的)置为1，其余的是0。看上去像是ReLU求导呢
     out = SpikingNN()(ex_membrane)
-    # detach(),清除梯度，不进行反向传播
-    # 这又是干嘛呢
+    # detach(),清除梯度，不进行反向传播(gran_fn ->None，is_leaf F->T,requires_grad T->F变了)
+    # 这又是干嘛呢，grad_fn确实有变化，多了好几层；值有略微变化
+    # print('sum1_:',torch.sum(out))
+    # print('sum2_:',torch.sum(out.detach()))
     out = out.detach() + (1 / threshold) * out - (1 / threshold) * out.detach()
-    # membrane_potential: 膜电位超出阈值0.75的置0，其余不变；
-    # out: 膜电位超出阈值0.75部分的部分中，超出0的置1，其余为0？这不就是该部分全部置1吗
+    # print('sum3_:',torch.sum(out))
+    # membrane_potential: 膜电位超出阈值0.75的reset0，其余不变；
+    # out: 膜电位超出阈值0.75的置1，其余为0
     return membrane_potential, out
 
 
@@ -120,19 +125,20 @@ class FlowNetS_spike(nn.Module):
         mem_3_total = torch.zeros(input.size(0), 256, int(image_resize / 8), int(image_resize / 8)).cuda()
         mem_4_total = torch.zeros(input.size(0), 512, int(image_resize / 16), int(image_resize / 16)).cuda()
 
-        # size(4) is 5
-        # nnforward20次
-        # 就是在这4*5=20
-        # 因为一共有五张图啊,
-        # 这里应该对应SNN-Block中的四层卷积吧,也就是这个循环对应的是蓝色的编码部分
+        # input size is (8,4,256,256,5)
+        # 每次循环的输入是1_ON,1_OFF,6_ON,6_OFF
+        # 这里对应SNN-Block中的四层卷积,也就是这个循环对应的是蓝色的编码部分
         for i in range(input.size(4)):
             input11 = input[:, :, :, :, i].cuda()
 
-            # mem都是累加的，只有out_conv不是
+            # mem和mem_total是累加的,他们的sum都是不断减少的,至少我前期看到的是这样的
+            # mem的sum是不断减少的
             current_1 = self.conv1(input11)
+            # 这里的电流是不断累加的，累加后会导致膜电位的变化
             mem_1 = mem_1 + current_1
             mem_1_total = mem_1_total + current_1
-            # 输入分别是膜电位和阈值
+            # 输入：累加的膜电位和阈值
+            # 输出：更新后的膜电位(产生脉冲的位置reset 0)和本层产生的脉冲
             mem_1, out_conv1 = IF_Neuron(mem_1, threshold)
             # print(1)
 
@@ -159,7 +165,7 @@ class FlowNetS_spike(nn.Module):
         mem_3_residual = 0
         mem_2_residual = 0
 
-        # 这里的四个就是红色的四个累计输出
+        # 这里的四个就是红色的四个累计输出，total是每一层直接卷积结果的和
         out_conv4 = mem_4_total + mem_4_residual
         out_conv3 = mem_3_total + mem_3_residual
         out_conv2 = mem_2_total + mem_2_residual
