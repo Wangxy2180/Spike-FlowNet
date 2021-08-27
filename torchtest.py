@@ -65,10 +65,35 @@ def fourDtest():
     print(input_rep.shape)
 
 
+def grid_sample():
+    # 1*1*3*3
+    img_in = np.array([[[[1, 2, 3], [1, 2, 3], [1, 2, 3]]]])
+    img_in = torch.from_numpy(img_in)
+    # 1*1*3*2
+    grid_np = np.array([[[[-1, -1], [0.5, 0.5], [0.75, 0.75]],
+                         [[-1, -1], [0, 0], [1, 1]],
+                        [[-0.5, -0.5], [-0.75, -0.75], [1, 1]]]])
+    # print(grid_np.shape)
+    grid = torch.from_numpy(grid_np)
+    # 本质上就是双线性采样，用grid中的值去img_in中采样
+    sampled = torch.nn.functional.grid_sample(img_in.to(torch.float), grid.to(torch.float))
+    print(sampled)
+    print('img  shape:', img_in.shape)
+    print('grid shape:', grid.shape)
+    print('samp shape:', sampled.shape)
+
+
+def torch_arange():
+    print('range :', torch.range(1, 5))
+    print('arange:', torch.arange(1, 5))
+
+
 def main():
     # nn_functional_threshold()
     # torchrand()
-    fourDtest()
+    # fourDtest()
+    # torch_arange()
+    grid_sample()
 
 
 if __name__ == '__main__':

@@ -27,29 +27,48 @@ def warp(x, flo):
     B, C, H, W = x.size()
     # mesh grid
     # xx yy 256*256
+    # torch.arange(),左闭右开
+    # view:将连续的一维数据拿来做数据填充;repeat 重扩张N次
+    # xx Size:(256,)->(1,256)->(256,256)
+    # xx是每一行是256(行向量)， yy是每一列是256(列向量)
     xx = torch.arange(0, W).view(1, -1).repeat(H, 1)
     yy = torch.arange(0, H).view(-1, 1).repeat(1, W)
     # xx yy 8*1*256*256
     xx = xx.view(1, 1, H, W).repeat(B, 1, 1, 1)
     yy = yy.view(1, 1, H, W).repeat(B, 1, 1, 1)
+    # grid(8*2*256*256)
     grid = torch.cat((xx, yy), 1).float()
 
     if x.is_cuda:
         grid = grid.cuda()
+    # flo中存储的是x，y方向分别走了多远
+    # 这样相加，就把他运动后的位置求出来了
     vgrid = grid + flo
 
     # scale grid to [-1,1]
+    # 这又是在干嘛呢，怎么个化思路？见cnblog.com/zi-wang/9950917.html
+    # grid_sample要求的，将坐标归一化到[-1,1]其中横坐标对应(0:-1; 1:width-1)
     vgrid[:, 0, :, :] = 2.0 * vgrid[:, 0, :, :].clone() / max(W - 1, 1) - 1.0
     vgrid[:, 1, :, :] = 2.0 * vgrid[:, 1, :, :].clone() / max(H - 1, 1) - 1.0
 
     vgrid = vgrid.permute(0, 2, 3, 1)
+    # 把灰度值做了双线性采样,用vgrid中的值去x中采样
+    # output:(8*1*256*256)原始图片根据光流运动后对应的位置的值;x(8*1*256*256)原始图片;vgrid(8*256*256*2)256*256个坐标对(x,y)
+    # 对应的是这个根据(x,y)走完后，在当前图上的取值
     output = nn.functional.grid_sample(x, vgrid)
     mask = torch.ones(x.size()).cuda()
     mask = nn.functional.grid_sample(mask, vgrid)
 
+    # 理论上来说，mask的最大值只能是1，也就是说:
+    # mask中，[0.9999,1]的为1，[0,0.9999)为0
+    # 应该是为了去除超出的边界点，确实都是边界点
+    # for i in range(256):
+    #     for j in range(256):
+    #         if(mask[0,0,i,j]<0.9999):
+    #             print('ij:',vgrid[0,i,j,0],vgrid[0,i,j,1],'val:',mask[0,0,i,j])
     mask[mask < 0.9999] = 0
     mask[mask > 0] = 1
-
+    # 距离像素点过远的就直接置0
     return output * mask
 
 
@@ -148,16 +167,22 @@ def flow_error_dense(flow_gt, flow_pred, event_img, is_car=False):
     flow_gt_cropped = flow_gt[:max_row, :]
     flow_pred_cropped = flow_pred[:max_row, :]
 
+    # 出现事件才为1的mask
     event_mask = event_img_cropped > 0
 
     # Only compute error over points that are valid in the GT (not inf or 0).
+    # 某点xy均为有效数值,且范数大于0，flow_mask才为1
+    # 范数的特殊含义是啥呢
+    # flow_mask 256*256
     flow_mask = np.logical_and(np.logical_and(~np.isinf(flow_gt_cropped[:, :, 0]), ~np.isinf(flow_gt_cropped[:, :, 1])),
                                np.linalg.norm(flow_gt_cropped, axis=2) > 0)
+    # 光流值存在，且该点也触发了事件
     total_mask = np.squeeze(np.logical_and(event_mask, flow_mask))
-
+    # 这两个mask，15*2；这个方法真神奇啊
     gt_masked = flow_gt_cropped[total_mask, :]
     pred_masked = flow_pred_cropped[total_mask, :]
 
+    # EE_gt是要干啥呢
     EE = np.linalg.norm(gt_masked - pred_masked, axis=-1)
     EE_gt = np.linalg.norm(gt_masked, axis=-1)
 
@@ -218,6 +243,7 @@ Inputs:
 
 
 def estimate_corresponding_gt_flow(x_flow_in, y_flow_in, gt_timestamps, start_time, end_time):
+    # 光流gt，390*260*346
     x_flow_in = np.array(x_flow_in, dtype=np.float64)
     y_flow_in = np.array(y_flow_in, dtype=np.float64)
     gt_timestamps = np.array(gt_timestamps, dtype=np.float64)
@@ -227,14 +253,19 @@ def estimate_corresponding_gt_flow(x_flow_in, y_flow_in, gt_timestamps, start_ti
     # Each gt flow at timestamp gt_timestamps[gt_iter] represents the displacement between gt_iter and gt_iter+1.
     gt_iter = np.searchsorted(gt_timestamps, start_time, side='right') - 1
     gt_dt = gt_timestamps[gt_iter + 1] - gt_timestamps[gt_iter]
+    # 当前时间段内的光流数据
     x_flow = np.squeeze(x_flow_in[gt_iter, ...])
     y_flow = np.squeeze(y_flow_in[gt_iter, ...])
 
     dt = end_time - start_time
 
     # No need to propagate if the desired dt is shorter than the time between gt timestamps.
+    # 意思就是，当前时段的光流能够完美覆盖所需的
     if gt_dt > dt:
+        # 计算时间上的比例从而计算除光流的比例
         return x_flow * dt / gt_dt, y_flow * dt / gt_dt
+    # 这下边几乎不会被用到，indoor_flying4是没有的
+    print('tttttt',start_time)
 
     x_indices, y_indices = np.meshgrid(np.arange(x_flow.shape[1]), np.arange(x_flow.shape[0]))
     x_indices = x_indices.astype(np.float32)

@@ -23,12 +23,18 @@ Input: flow: [batch_size, width, height, 2]
 Output: flow_rgb: [batch_size, width, height, 3]
 """
 def flow_viz_np(flow_x, flow_y):
+    # 炫彩光流
+    # zhunanlan.zhihu.com/p/89615274
     import cv2
+    # 这拆拆和和的，图啥啊
     flows = np.stack((flow_x, flow_y), axis=2)
+    # 求解范数
     mag = np.linalg.norm(flows, axis=2)
 
+    # 批量计算反正切
     ang = np.arctan2(flow_y, flow_x)
     ang += np.pi
+    # 弧度变角度？
     ang *= 180. / np.pi / 2.
     ang = ang.astype(np.uint8)
     hsv = np.zeros([flow_x.shape[0], flow_x.shape[1], 3], dtype=np.uint8)

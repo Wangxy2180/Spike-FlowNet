@@ -140,25 +140,21 @@ class FlowNetS_spike(nn.Module):
             # 输入：累加的膜电位和阈值
             # 输出：更新后的膜电位(产生脉冲的位置reset 0)和本层产生的脉冲
             mem_1, out_conv1 = IF_Neuron(mem_1, threshold)
-            # print(1)
 
             current_2 = self.conv2(out_conv1)
             mem_2 = mem_2 + current_2
             mem_2_total = mem_2_total + current_2
             mem_2, out_conv2 = IF_Neuron(mem_2, threshold)
-            # print(2)
 
             current_3 = self.conv3(out_conv2)
             mem_3 = mem_3 + current_3
             mem_3_total = mem_3_total + current_3
             mem_3, out_conv3 = IF_Neuron(mem_3, threshold)
-            # print(3)
 
             current_4 = self.conv4(out_conv3)
             mem_4 = mem_4 + current_4
             mem_4_total = mem_4_total + current_4
             mem_4, out_conv4 = IF_Neuron(mem_4, threshold)
-            # print(4)
 
         # 这三个应该是SNN部分那三个绿线残差
         mem_4_residual = 0

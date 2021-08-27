@@ -145,7 +145,7 @@ class Train_loading(Dataset):
 
                 # range(5)
                 for p in range(int(self.split / 2 * self.dt)):
-                    # 这样可以保证同一批次中的每一个的结果都一样吗？
+                    # 保证每个批次结果一样
                     # fix the data transformation
                     random.seed(seed)
                     torch.manual_seed(seed)
@@ -350,6 +350,7 @@ def train(train_loader, model, optimizer, epoch, train_writer):
 def validate(test_loader, model, epoch, output_writers):
     global args, image_resize, sp_threshold
     d_label = h5py.File(gt_file, 'r')
+    # 390*2*260*346
     gt_temp = np.float32(d_label['davis']['left']['flow_dist'])
     gt_ts_temp = np.float64(d_label['davis']['left']['flow_dist_ts'])
     d_label = None
@@ -376,9 +377,11 @@ def validate(test_loader, model, epoch, output_writers):
 
     # 0 is start location
     for i, data in enumerate(test_loader, 0):
+        # 这一帧灰度的开始时间和结束时间
         former_inputs_on, former_inputs_off, latter_inputs_on, latter_inputs_off, st_time, ed_time = data
 
         if torch.sum(former_inputs_on + former_inputs_off) > 0:
+            # 1*4*256*256*5
             input_representation = torch.zeros(former_inputs_on.size(0), batch_size_v, image_resize, image_resize,
                                                former_inputs_on.size(3)).float()
             # 所谓4通道
@@ -407,6 +410,7 @@ def validate(test_loader, model, epoch, output_writers):
             U_gt_all = np.array(gt_temp[:, 0, :, :])
             V_gt_all = np.array(gt_temp[:, 1, :, :])
 
+            # 得到在两个灰度图之间的光流信息
             U_gt, V_gt = estimate_corresponding_gt_flow(U_gt_all, V_gt_all, gt_ts_temp, np.array(st_time),
                                                         np.array(ed_time))
             gt_flow = np.stack((U_gt, V_gt), axis=2)
@@ -418,7 +422,7 @@ def validate(test_loader, model, epoch, output_writers):
                 mask_temp = torch.sum(torch.sum(mask_temp, 0), 2)
                 mask_temp_np = np.squeeze(np.array(mask_temp)) > 0
 
-                # 所谓spike_image，就是指在两张灰度图之间，出现事件，那就认为他是spike
+                # 所谓spike_image，就是指在两张灰度图之间，出现事件，那就认为他是spike,就是255
                 spike_image = mask_temp
                 spike_image[spike_image > 0] = 255
                 # spike_image.shape 256*256
@@ -435,6 +439,7 @@ def validate(test_loader, model, epoch, output_writers):
                                     interpolation=cv2.INTER_LINEAR)
                 y_flow = cv2.resize(np.array(out_temp[0, 1, :, :]), (scale * image_resize, scale * image_resize),
                                     interpolation=cv2.INTER_LINEAR)
+                # 炫彩光流图
                 flow_rgb = flow_viz_np(x_flow, y_flow)
                 if args.render:
                     cv2.imshow('Predicted Flow Output', cv2.cvtColor(flow_rgb, cv2.COLOR_BGR2RGB))
@@ -443,14 +448,16 @@ def validate(test_loader, model, epoch, output_writers):
                                        interpolation=cv2.INTER_LINEAR)
                 gt_flow_y = cv2.resize(gt_flow[:, :, 1], (scale * image_resize, scale * image_resize),
                                        interpolation=cv2.INTER_LINEAR)
+                # 炫彩gt光流
                 gt_flow_large = flow_viz_np(gt_flow_x, gt_flow_y)
                 if args.render:
                     cv2.imshow('GT Flow', cv2.cvtColor(gt_flow_large, cv2.COLOR_BGR2RGB))
-
+                # mask_tmp_np就是把所有产生事件的位置置为1了
                 masked_x_flow = cv2.resize(np.array(out_temp[0, 0, :, :] * mask_temp_np),
                                            (scale * image_resize, scale * image_resize), interpolation=cv2.INTER_LINEAR)
                 masked_y_flow = cv2.resize(np.array(out_temp[0, 1, :, :] * mask_temp_np),
                                            (scale * image_resize, scale * image_resize), interpolation=cv2.INTER_LINEAR)
+                # 炫彩mask_pred_flow
                 flow_rgb_masked = flow_viz_np(masked_x_flow, masked_y_flow)
                 if args.render:
                     cv2.imshow('Masked Predicted Flow', cv2.cvtColor(flow_rgb_masked, cv2.COLOR_BGR2RGB))
@@ -462,6 +469,7 @@ def validate(test_loader, model, epoch, output_writers):
                 gt_flow_masked_y = cv2.resize(gt_flow_cropped[:, :, 1] * mask_temp_np,
                                               (scale * image_resize, scale * image_resize),
                                               interpolation=cv2.INTER_LINEAR)
+                # 炫彩mask_gt_flow
                 gt_masked_flow = flow_viz_np(gt_flow_masked_x, gt_flow_masked_y)
                 if args.render:
                     cv2.imshow('GT Masked Flow', cv2.cvtColor(gt_masked_flow, cv2.COLOR_BGR2RGB))
@@ -498,7 +506,7 @@ def validate(test_loader, model, epoch, output_writers):
                 output_writers[i].add_image('FlowNet Outputs', flow2rgb(args.div_flow * output[0], max_value=10), epoch)
 
             iters += 1
-
+    # 这个n_points好像有点问题啊，这样一来不是只计算最后的了吗
     print('-------------------------------------------------------')
     print('Mean AEE: {:.2f}, sum AEE: {:.2f}, Mean AEE_gt: {:.2f}, sum AEE_gt: {:.2f}, mean %AEE: {:.2f}, # pts: {:.2f}'
           .format(AEE_sum / iters, AEE_sum_sum / iters, AEE_sum_gt / iters, AEE_sum_sum_gt / iters,
@@ -585,7 +593,7 @@ def main():
     elif args.solver == 'sgd':
         optimizer = torch.optim.SGD(param_groups, args.lr, momentum=args.momentum)
     # sys.exit()
-    # args.evaluate = True
+    args.evaluate = True
     if args.evaluate:
         # 强制之后的内容不进行计算图构建，不追踪梯度
         with torch.no_grad():
