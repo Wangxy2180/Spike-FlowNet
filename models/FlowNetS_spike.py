@@ -108,7 +108,7 @@ class FlowNetS_spike(nn.Module):
                     constant_(m.bias, 0)
 
     def forward(self, input, image_resize, sp_threshold):
-        # print('fff')
+        print('fff')
         # 这里的主干网络应该来自于EV-flownet和firenet
         # o.75
         threshold = sp_threshold
@@ -124,6 +124,7 @@ class FlowNetS_spike(nn.Module):
         mem_2_total = torch.zeros(input.size(0), 128, int(image_resize / 4), int(image_resize / 4)).cuda()
         mem_3_total = torch.zeros(input.size(0), 256, int(image_resize / 8), int(image_resize / 8)).cuda()
         mem_4_total = torch.zeros(input.size(0), 512, int(image_resize / 16), int(image_resize / 16)).cuda()
+        # 每次forward，膜电位就会清0
 
         # input size is (8,4,256,256,5)
         # 每次循环的输入是1_ON,1_OFF,6_ON,6_OFF

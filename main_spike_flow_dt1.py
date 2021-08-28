@@ -306,6 +306,7 @@ def train(train_loader, model, optimizer, epoch, train_writer):
             # 执行20次NNforward，
             # 输出是flow1 ~ flow4
             # output tuple(8*2*256*256,8*2*128*128,8*2*64*64,8*2*32*32)
+            print('ww:',ww)
             output = model(input_representation.type(torch.cuda.FloatTensor), image_resize, sp_threshold)
             # print('jjj')
 
@@ -593,7 +594,7 @@ def main():
     elif args.solver == 'sgd':
         optimizer = torch.optim.SGD(param_groups, args.lr, momentum=args.momentum)
     # sys.exit()
-    args.evaluate = True
+    # args.evaluate = True
     if args.evaluate:
         # 强制之后的内容不进行计算图构建，不追踪梯度
         with torch.no_grad():
