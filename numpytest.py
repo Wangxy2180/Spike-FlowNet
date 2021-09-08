@@ -7,8 +7,10 @@ def norm_test():
     print('norm_test:', np.linalg.norm(a))
 
     a = np.array([[2, 2], [1, 1]])
-    print('norm_test:',np.linalg.norm(a))
+    print('norm_test:', np.linalg.norm(a))
 
+    a = np.array([[[2, 2], [1, 1]]])
+    print('norm_test:', np.linalg.norm(a, axis=-1))
 
 
 def main():

@@ -1,4 +1,6 @@
 /datasets/indoor_flying4
+/datasets/indoor_flying1
+/datasets/outdoor_day2
 .idea/
 spikeflownet/
 __pycache__/

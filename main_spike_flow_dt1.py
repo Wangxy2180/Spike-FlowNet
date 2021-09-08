@@ -86,8 +86,8 @@ event_interval = 0
 spiking_ts = 1
 sp_threshold = 0
 
-# trainenv = 'outdoor_day2'
-trainenv = 'indoor_flying4'
+trainenv = 'outdoor_day2'
+# trainenv = 'indoor_flying4'
 # testenv = 'indoor_flying1'
 testenv = 'indoor_flying4'
 
@@ -306,7 +306,6 @@ def train(train_loader, model, optimizer, epoch, train_writer):
             # 执行20次NNforward，
             # 输出是flow1 ~ flow4
             # output tuple(8*2*256*256,8*2*128*128,8*2*64*64,8*2*32*32)
-            print('ww:',ww)
             output = model(input_representation.type(torch.cuda.FloatTensor), image_resize, sp_threshold)
             # print('jjj')
 
@@ -340,7 +339,7 @@ def train(train_loader, model, optimizer, epoch, train_writer):
             end = time.time()
 
             if mini_batch_size_v * ww % args.print_freq < mini_batch_size_v:
-                print('Epoch: [{0}][{1}/{2}]\t Time {3}\t Data {4}\t Loss {5}'
+                print('Epoch: [{0}][{1}/{2}]  \t Time {3}\t Data {4}\t Loss {5}'
                       .format(epoch, mini_batch_size_v * ww, mini_batch_size_v * len(train_loader), batch_time,
                               data_time, losses))
             n_iter += 1
@@ -564,7 +563,7 @@ def main():
                              num_workers=args.workers)
 
     # create model
-    args.ptrtrained='./pretrain/checkpoint_dt1.pth.tar'
+    # args.ptrtrained='./pretrain/checkpoint_dt1.pth.tar'
     if args.pretrained:
         network_data = torch.load(args.pretrained)
         # args.arch = network_data['arch']
@@ -610,10 +609,12 @@ def main():
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones, gamma=0.7)
 
     # range(0,100)
+    # for epoch in range(5):
     for epoch in range(args.start_epoch, args.epochs):
         scheduler.step()
 
         # train for one epoch
+        # mean_loss update in every epoch
         train_loss = train(train_loader, model, optimizer, epoch, train_writer)
         train_writer.add_scalar('mean loss', train_loss, epoch)
 

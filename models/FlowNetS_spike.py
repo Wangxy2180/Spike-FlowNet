@@ -108,7 +108,7 @@ class FlowNetS_spike(nn.Module):
                     constant_(m.bias, 0)
 
     def forward(self, input, image_resize, sp_threshold):
-        print('fff')
+        # print('fff')
         # 这里的主干网络应该来自于EV-flownet和firenet
         # o.75
         threshold = sp_threshold

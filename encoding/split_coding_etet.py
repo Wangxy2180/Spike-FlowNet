@@ -11,7 +11,7 @@ parser.add_argument('--save-dir', type=str, default='../datasets', metavar='PARA
                     help='Main Directory to save all encoding results')
 parser.add_argument('--save-env', type=str, default='indoor_flying4', metavar='PARAMS',
                     help='Sub-Directory name to save Environment specific encoding results')
-parser.add_argument('--data-path', type=str, default='../datasets/indoor_flying4/indoor_flying4_data.hdf5',
+parser.add_argument('--data-path', type=str, default='../datasets/indoor_flying1/indoor_flying1_data.hdf5',
                     metavar='PARAMS', help='HDF5 datafile path to load raw data from')
 args = parser.parse_args()
 
@@ -60,8 +60,11 @@ class Events(object):
                 # 第一次循环，这里绝对是错的，i-1是-1啊
                 # 简单的说，就是从上一帧的最后一个事件到现在这帧
                 # 但是这里时间并不是从第0个开始的，而是从第0个ind对应的事件开始的
+                # 这里是有问题的，第二帧事件因该是108-267，但这里是从107开始的
+                # 那两个+1是我后来加的，修复了这个bug
                 frame_data = input_event[
-                             image_raw_event_inds_temp[i - 1]:image_raw_event_inds_temp[i + (dt_time_temp - 1)], :]
+                             image_raw_event_inds_temp[i - 1] + 1:image_raw_event_inds_temp[i + (dt_time_temp - 1)] + 1,
+                             :]
 
             if frame_data.size > 0:
                 td_img_c.fill(0)
@@ -74,10 +77,16 @@ class Events(object):
                     for vv in range(int(frame_data.shape[0] / data_split)):
                         v = int(frame_data.shape[0] / data_split) * m + vv
                         # 这里是在做polar的判定 做的是累加
-                        if frame_data[v, 3].item() == -1:
-                            td_img_c[1, frame_data[v, 1].astype(int), frame_data[v, 0].astype(int), m] += 1
-                        elif frame_data[v, 3].item() == 1:
+                        # if frame_data[v, 3].item() == -1:
+                        #     td_img_c[1, frame_data[v, 1].astype(int), frame_data[v, 0].astype(int), m] += 1
+                        # elif frame_data[v, 3].item() == 1:
+                        #     td_img_c[0, frame_data[v, 1].astype(int), frame_data[v, 0].astype(int), m] += 1
+                        if frame_data[v, 3].item() in [1, -1]:
                             td_img_c[0, frame_data[v, 1].astype(int), frame_data[v, 0].astype(int), m] += 1
+                            min_t = image_raw_ts_temp[i - 1]
+                            max_t = image_raw_ts_temp[i + (dt_time_temp - 1)]
+                            t = (frame_data[v, 2].item() - min_t) / (max_t - min_t)
+                            td_img_c[1, frame_data[v, 1].astype(int), frame_data[v, 0].astype(int), m] = t
 
             t_index = t_index + 1
 
@@ -85,7 +94,7 @@ class Events(object):
             # 这个gray就是单纯的弄了个save
             np.save(os.path.join(gray_dir, str(i)), gray[i, :, :])
 
-            cv2.imshow("456",gray[i,:,:])
+            cv2.imshow("456", gray[i, :, :])
             cv2.waitKey(1)
 
 
@@ -126,5 +135,5 @@ raw_data = None
 print('Encoding complete!')
 #
 for i in range(gray_image.shape[0]):
-    cv2.imshow("123",gray_image[i])
+    cv2.imshow("123", gray_image[i])
     cv2.waitKey(1)
