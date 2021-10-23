@@ -81,6 +81,7 @@ args = parser.parse_args()
 best_EPE = -1
 n_iter = 0
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print('--device is:',device)
 image_resize = 256
 event_interval = 0
 spiking_ts = 1
@@ -88,8 +89,11 @@ sp_threshold = 0
 
 trainenv = 'outdoor_day2'
 # trainenv = 'indoor_flying4'
-# testenv = 'indoor_flying1'
-testenv = 'indoor_flying4'
+# trainenv = 'indoor_flying1'
+
+testenv = 'indoor_flying1'
+# testenv = 'indoor_flying2'
+# testenv = 'indoor_flying4'
 
 traindir = os.path.join(args.data, trainenv)
 testdir = os.path.join(args.data, testenv)
@@ -282,6 +286,7 @@ def train(train_loader, model, optimizer, epoch, train_writer):
 
         # 两张灰度图之间有事件，才进行操作
         if torch.sum(former_inputs_on + former_inputs_off) > 0:
+            # print('aaaaaaaaaaaaaaaaaaaaa')
             # input torch.Size([8, 4, 256, 256, 5])
             input_representation = torch.zeros(former_inputs_on.size(0), batch_size_v, image_resize, image_resize,
                                                former_inputs_on.size(3)).float()
@@ -339,7 +344,7 @@ def train(train_loader, model, optimizer, epoch, train_writer):
             end = time.time()
 
             if mini_batch_size_v * ww % args.print_freq < mini_batch_size_v:
-                print('Epoch: [{0}][{1}/{2}]  \t Time {3}\t Data {4}\t Loss {5}'
+                print('Epoch: [{0}][{1}/{2}]    \t Time {3}\t Data {4}\t Loss {5}'
                       .format(epoch, mini_batch_size_v * ww, mini_batch_size_v * len(train_loader), batch_time,
                               data_time, losses))
             n_iter += 1

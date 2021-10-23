@@ -1,6 +1,13 @@
 /datasets/indoor_flying4
+/datasets/indoor_flying3
+/datasets/indoor_flying2
 /datasets/indoor_flying1
 /datasets/outdoor_day2
+/datasets/outdoor_day1
+*.pth.tar
+celex_*.csv
+celex_*.txt
+
 .idea/
 spikeflownet/
 __pycache__/

@@ -1,5 +1,4 @@
 import sys
-
 import cv2
 import numpy as np
 import os
@@ -23,9 +22,10 @@ count_dir = os.path.join(save_path, 'count_data')
 if not os.path.exists(count_dir):
     os.makedirs(count_dir)
 
-gray_dir = os.path.join(save_path, 'gray_data')
-if not os.path.exists(gray_dir):
-    os.makedirs(gray_dir)
+
+# gray_dir = os.path.join(save_path, 'gray_data')
+# if not os.path.exists(gray_dir):
+#     os.makedirs(gray_dir)
 
 
 class Events(object):
@@ -35,7 +35,7 @@ class Events(object):
         self.width = width
         self.height = height
 
-    def generate_fimage(self, input_event=0, gray=0, image_raw_event_inds_temp=0, image_raw_ts_temp=0, dt_time_temp=0):
+    def generate_fimage(self, input_event=0,  image_raw_event_inds_temp=0, image_raw_ts_temp=0, dt_time_temp=0):
         # print(image_raw_event_inds_temp.shape, image_raw_ts_temp.shape)
         # 623
         split_interval = image_raw_ts_temp.shape[0]
@@ -91,16 +91,13 @@ class Events(object):
                             min_t = image_raw_ts_temp[i - 1]
                             max_t = image_raw_ts_temp[i + (dt_time_temp - 1)]
                             t = (frame_data[v, 2].item() - min_t) / (max_t - min_t)
-                            td_img_c[1, frame_data[v, 1].astype(int), frame_data[v, 0].astype(int), m] = round(t*255)
+                            td_img_c[1, frame_data[v, 1].astype(int), frame_data[v, 0].astype(int), m] = round(t * 255)
 
             t_index = t_index + 1
 
             np.save(os.path.join(count_dir, str(i)), td_img_c)
             # 这个gray就是单纯的弄了个save
-            np.save(os.path.join(gray_dir, str(i)), gray[i, :, :])
 
-            cv2.imshow(args.save_env, gray[i, :, :])
-            cv2.waitKey(1)
 
 
 # indoor_flying1_data.hdf5
@@ -110,14 +107,12 @@ d_set = h5py.File(args.data_path, 'r')
 # raw data(8024748, 4)
 # image raw ind <HDF5 dataset "image_raw_event_inds": shape (623,), type "<i8">
 # image raw  ts (623,)
-# gray iamges(623, 260, 346)
 
 # xytp
 raw_data = d_set['davis']['left']['events']
 # 这个里边是每个灰度图对应的事件序号吗？，最大值8024747 事件数量是8024748
 image_raw_event_inds = d_set['davis']['left']['image_raw_event_inds']
 image_raw_ts = np.float64(d_set['davis']['left']['image_raw_ts'])
-gray_image = d_set['davis']['left']['image_raw']
 d_set = None
 
 # 第一个ts对应事件107附近，他是怎么做的这个呢
@@ -128,17 +123,14 @@ dt_time = 1
 print('raw data shape', raw_data.shape)
 print('image raw ind', image_raw_event_inds)
 print('image raw ts', image_raw_ts.shape)
-print('gray data shape', gray_image.shape)
 # sys.exit()
 # shape[0] is num_events
 td = Events(raw_data.shape[0])
 # Events
-td.generate_fimage(input_event=raw_data, gray=gray_image, image_raw_event_inds_temp=image_raw_event_inds,
+td.generate_fimage(input_event=raw_data, image_raw_event_inds_temp=image_raw_event_inds,
                    image_raw_ts_temp=image_raw_ts, dt_time_temp=dt_time)
 raw_data = None
 
 print('Encoding complete!')
 #
-for i in range(gray_image.shape[0]):
-    cv2.imshow(args.save_env, gray_image[i])
-    cv2.waitKey(1)
+

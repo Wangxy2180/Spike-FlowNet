@@ -12,9 +12,16 @@ def norm_test():
     a = np.array([[[2, 2], [1, 1]]])
     print('norm_test:', np.linalg.norm(a, axis=-1))
 
+def load_npy():
+    im_onoff = np.load('./datasets/indoor_flying1' + '/count_data/' + str(99) + '.npy')
+    print(np.sum(im_onoff))
+
+    im_onoff = np.load('./datasets/outdoor_day2' + '/count_data/' + str(99) + '.npy')
+    print(np.sum(im_onoff))
 
 def main():
-    norm_test()
+    # norm_test()
+    load_npy()
 
 
 if __name__ == '__main__':

@@ -85,7 +85,7 @@ class Events(object):
             # 这个gray就是单纯的弄了个save
             np.save(os.path.join(gray_dir, str(i)), gray[i, :, :])
 
-            cv2.imshow("456",gray[i,:,:])
+            cv2.imshow(args.save_env,gray[i,:,:])
             cv2.waitKey(1)
 
 
