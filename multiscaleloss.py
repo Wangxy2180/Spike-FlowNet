@@ -110,7 +110,7 @@ def compute_photometric_loss(prev_images_temp, next_images_temp, event_images, o
 
         # 根据光流，将第二张图反推，得到第一张图，然后和原始的第一张图做比较
         next_images_warped = warp(next_images_resize.cuda(), flow.cuda())
-        # 得到灰度值差
+        # 得到灰度值差，如果为了适应celex这里的差值似乎应该做一些修改
         error_temp = next_images_warped - prev_images_resize.cuda()
         # charbonnier损失
         photometric_loss = charbonnier_loss(error_temp)

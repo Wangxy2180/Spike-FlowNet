@@ -19,10 +19,9 @@ def main():
     # csv = np.array([[1, 3, 3], [7, 2, 0], [8, 5, 4], [2, 1, 7], [7, 6, 2], [1, 2, 9], [1, 4, 3]])
     # csv = [[1, 2, 3], [1, 2, 0], [1, 2, 4], [1, 2, 7], [1, 2, 2], [1, 2, 9], [1, 4, 3]]
     # print(csv)
-    csv = csv.tolist()
-    csv.sort(key=lambda x: x[2])
+    # csv = csv.tolist()
     # 转来转去，我简直有病
-    csv = np.array(csv)
+    # csv = np.array(csv)
     csv = csv[:, :3]
     csv = csv[:, [1, 0, 2]]
     # print(csv)
@@ -34,4 +33,3 @@ def main():
 if __name__ == '__main__':
     main()
     print('done!')
-

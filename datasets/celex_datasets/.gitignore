@@ -1,0 +1,8 @@
+
+!.gitignore
+/csv_data/*
+!/csv_data/.gitkeep
+/txt_data/*
+!/txt_data/.gitkeep
+/encoded_data/*
+!/encoded_data/*.gitkeep

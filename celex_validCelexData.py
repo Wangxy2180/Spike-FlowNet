@@ -10,6 +10,7 @@ import torchvision.transforms as transforms
 import models
 import datasets
 from multiscaleloss import compute_photometric_loss, estimate_corresponding_gt_flow, flow_error_dense, smooth_loss
+from celex_loss import celex_compute_photometric_loss
 import datetime
 from tensorboardX import SummaryWriter
 from util import flow2rgb, AverageMeter, save_checkpoint
@@ -26,7 +27,7 @@ model_names = sorted(name for name in models.__dict__
                      if name.islower() and not name.startswith("__"))
 parser = argparse.ArgumentParser(description='Spike-FlowNet Training on several datasets',
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument('--data', type=str, metavar='DIR', default='./datasets/celex_datasets',
+parser.add_argument('--data', type=str, metavar='DIR', default='./datasets/celex_datasets/encoded_data',
                     help='path to dataset')
 parser.add_argument('--savedir', type=str, metavar='DATASET', default='spikeflownet',
                     help='results save dir')
@@ -38,7 +39,7 @@ parser.add_argument('--solver', default='adam', choices=['adam', 'sgd'],
                     help='solver algorithms')
 parser.add_argument('-j', '--workers', default=8, type=int, metavar='N',
                     help='number of data loading workers')
-parser.add_argument('--epochs', default=100, type=int, metavar='N',
+parser.add_argument('--epochs', default=10000, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
@@ -75,61 +76,60 @@ parser.add_argument('--milestones', default=[5, 10, 20, 30, 40, 50, 70, 90, 110,
                     help='epochs at which learning rate is divided by 2')
 parser.add_argument('--render', dest='render', action='store_true',
                     help='evaluate model on validation set')
-parser.add_argument('--celexencode', action='store_true')
 args = parser.parse_args()
 
 # Initializations
 best_EPE = -1
 n_iter = 0
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-image_resize = 800
+image_resize = 256
 event_interval = 0
 spiking_ts = 1
 sp_threshold = 0
 
-testenv = 'celex_l2r'
+# testenv = 'celex_l2r'
 # testenv = 'celex_r2l'
-# testenv = 'celex_t2b'
-# testenv = 'celex_b2t'
-
+# testenv = 'walk2'
+testenv = 'walk'
 testdir = os.path.join(args.data, testenv)
+test_arrow_dir = os.path.join(testdir, 'arrow_flow')
+test_color_dir = os.path.join(testdir, 'color_flow')
 
-testfile = testdir + '/' + testenv + '_data.txt'
-
-test_flow_map_dir = os.path.join(testdir, 'celex_image_flow')
+# data到encode文件夹
+trainenv = 'walk2'
+traindir = os.path.join(args.data, trainenv)
 
 
 class Test_loading(Dataset):
     # Initialize your data, download, etc.
     def __init__(self):
         self.dt = 1
-        self.xoff = 240
-        self.yoff = 0
+        self.xoff = 45
+        self.yoff = 2
         self.split = 10
         self.half_split = int(self.split / 2)
 
-        d_set = h5py.File(testfile, 'r')
+        # d_set = h5py.File(testfile, 'r')
 
         # Training input data, label parse
         # ts size is 623
-        self.image_raw_ts = np.float64(d_set['davis']['left']['image_raw_ts'])
-        self.length = len(os.listdir(testdir))
-        d_set = None
+        # self.image_raw_ts = np.float64(d_set['davis']['left']['image_raw_ts'])
+        self.length = len(os.listdir(os.path.join(testdir, 'count_data')))
+        # d_set = None
 
     def __getitem__(self, index):
         # 这四个对应
         # former_inputs_on, former_inputs_off, latter_inputs_on, latter_inputs_off
         # 这个20又是什么道理呢？
-        if (index + 20 < self.length) and (index > 20):
+        if (index + 2 < self.length) and (index > 2):
             # 256,256,5
-            aa = np.zeros((800, 800, self.half_split), dtype=np.uint8)
-            bb = np.zeros((800, 800, self.half_split), dtype=np.uint8)
-            cc = np.zeros((800, 800, self.half_split), dtype=np.uint8)
-            dd = np.zeros((800, 800, self.half_split), dtype=np.uint8)
+            aa = np.zeros((256, 256, self.half_split), dtype=np.uint8)
+            bb = np.zeros((256, 256, self.half_split), dtype=np.uint8)
+            cc = np.zeros((256, 256, self.half_split), dtype=np.uint8)
+            dd = np.zeros((256, 256, self.half_split), dtype=np.uint8)
 
             im_et = np.load(testdir + '/count_data/' + str(int(index + 1)) + '.npy')
 
-            # 800-0-0=800 1280-240-240=800,,,,256?
             # 也就是说他不是resize的，而是直接剪裁的
             aa[:, :, :] = im_et[0, self.yoff:-self.yoff, self.xoff:-self.xoff, 0:5].astype(float)
             bb[:, :, :] = im_et[1, self.yoff:-self.yoff, self.xoff:-self.xoff, 0:5].astype(float)
@@ -150,16 +150,140 @@ class Test_loading(Dataset):
         return self.length
 
 
+class Train_loading(Dataset):
+    # Initialize your data, download, etc.
+    def __init__(self, transform=None):
+        self.transform = transform
+        # Training input data, label parse
+        self.dt = 1
+        self.split = 10
+        self.half_split = int(self.split / 2)
+        self.row = 260
+        self.col = 346
+
+        # 这里读入encode_data和count_data
+        self.encode_data = [str(i) + '.npy' for i in range(len(os.listdir(os.path.join(traindir, 'count_data'))) - 1)]
+        # self.gray_img = [str(i) + '.npy' for i in range(len(os.listdir(os.path.join(traindir, 'gray_data'))) - 1)]
+        self.length = len(self.encode_data)
+        # self.image_raw_event_inds = np.float64(d_set['davis']['left']['image_raw_event_inds'])
+        # self.image_raw_ts = np.float64(d_set['davis']['left']['image_raw_ts'])
+        # gray image re-size
+        # self.length = d_set['davis']['left']['image_raw'].shape[0]
+        # d_set = None
+
+    def __getitem__(self, index):
+        if index + 2 < self.length and index > 2:
+            aa = np.zeros((self.row, self.col, self.half_split), dtype=np.uint8)
+            bb = np.zeros((self.row, self.col, self.half_split), dtype=np.uint8)
+            cc = np.zeros((self.row, self.col, self.half_split), dtype=np.uint8)
+            dd = np.zeros((self.row, self.col, self.half_split), dtype=np.uint8)
+
+            im_onoff = np.load(traindir + '/count_data/' + str(int(index + 1)) + '.npy')
+
+            aa[:, :, :] = im_onoff[0, :, :, 0:5]
+            bb[:, :, :] = im_onoff[1, :, :, 0:5]
+            cc[:, :, :] = im_onoff[0, :, :, 5:10]
+            dd[:, :, :] = im_onoff[1, :, :, 5:10]
+
+            ee = np.uint8(np.load(traindir + '/gray_data/' + str(int(index)) + '.npy'))
+            ff = np.uint8(np.load(traindir + '/gray_data/' + str(int(index + self.dt)) + '.npy'))
+
+            if self.transform:
+                seed = np.random.randint(2147483647)
+
+                aaa = torch.zeros(256, 256, int(aa.shape[2]))
+                bbb = torch.zeros(256, 256, int(bb.shape[2]))
+                ccc = torch.zeros(256, 256, int(cc.shape[2]))
+                ddd = torch.zeros(256, 256, int(dd.shape[2]))
+
+                # range(5)
+                for p in range(int(self.split / 2 * self.dt)):
+                    # 保证每个批次结果一样
+                    # fix the data transformation
+                    random.seed(seed)
+                    torch.manual_seed(seed)
+                    scale_a = aa[:, :, p].max()
+                    aaa[:, :, p] = self.transform(aa[:, :, p])
+                    # 这个是干嘛呢
+                    if torch.max(aaa[:, :, p]) > 0:
+                        aaa[:, :, p] = scale_a * aaa[:, :, p] / torch.max(aaa[:, :, p])
+
+                    # fix the data transformation
+                    random.seed(seed)
+                    torch.manual_seed(seed)
+                    scale_b = bb[:, :, p].max()
+                    bbb[:, :, p] = self.transform(bb[:, :, p])
+                    if torch.max(bbb[:, :, p]) > 0:
+                        bbb[:, :, p] = scale_b * bbb[:, :, p] / torch.max(bbb[:, :, p])
+
+                    # fix the data transformation
+                    random.seed(seed)
+                    torch.manual_seed(seed)
+                    scale_c = cc[:, :, p].max()
+                    ccc[:, :, p] = self.transform(cc[:, :, p])
+                    if torch.max(ccc[:, :, p]) > 0:
+                        ccc[:, :, p] = scale_c * ccc[:, :, p] / torch.max(ccc[:, :, p])
+
+                    # fix the data transformation
+                    random.seed(seed)
+                    torch.manual_seed(seed)
+                    scale_d = dd[:, :, p].max()
+                    ddd[:, :, p] = self.transform(dd[:, :, p])
+                    if torch.max(ddd[:, :, p]) > 0:
+                        ddd[:, :, p] = scale_d * ddd[:, :, p] / torch.max(ddd[:, :, p])
+
+                    # print('abcd',scale_a,scale_b,scale_c,scale_d)
+
+                # fix the data transformation
+                random.seed(seed)
+                torch.manual_seed(seed)
+                ee = self.transform(ee)
+
+                # fix the data transformation
+                random.seed(seed)
+                torch.manual_seed(seed)
+                ff = self.transform(ff)
+
+            # 这都是啥
+            if torch.max(aaa) > 0 and torch.max(bbb) > 0 and torch.max(ccc) > 0 and torch.max(ddd) > 0 and torch.max(
+                    ee) > 0 and torch.max(ff) > 0:
+
+                return aaa, bbb, ccc, ddd, ee / torch.max(ee), ff / torch.max(ff)
+            else:
+                pp = torch.zeros(image_resize, image_resize, self.half_split)
+                return pp, pp, pp, pp, torch.zeros(1, image_resize, image_resize), torch.zeros(1, image_resize,
+                                                                                               image_resize)
+        else:
+            pp = torch.zeros(image_resize, image_resize, self.half_split)
+            return pp, pp, pp, pp, torch.zeros(1, image_resize, image_resize), torch.zeros(1, image_resize,
+                                                                                           image_resize)
+
+    def __len__(self):
+        return self.length
+
+
 def drawOptFlowMap(flow, img, step, color, name_idx):
-    for x in range(0, 800, step):
-        for y in range(0, 800, step):
-            start_point = (x, y)
-            end_point = (round(x + flow[x, y, 0]), round(y + flow[x, y, 1]))
-            cv2.line(img, start_point, end_point, color)
-            cv2.arrowedLine(img, start_point, end_point, color)
-            cv2.circle(img, start_point, 2, color)
-    cv2.imshow('celex', img)
-    cv2.imwrite(test_flow_map_dir + '/' + name_idx + '.jpg', img)
+    # 灰度转rgb，应该有便捷的方法吧
+    # 这里的图也有问题，尺寸不对,img转
+    row_off = 2
+    col_off = 45
+    img = img[row_off:-row_off, col_off:-col_off]
+    rgb = np.zeros((img.shape[0], img.shape[1], 3), dtype=np.uint8)
+    rgb[:, :, 0] = img
+    rgb[:, :, 1] = img
+    rgb[:, :, 2] = img
+    for row in range(0, img.shape[0], 8):
+        for col in range(0, img.shape[1], 8):
+            start_point = (col, row)
+            end_point = (int(round(col + flow[row, col, 0])), int(round(row + flow[row, col, 1])))
+            # 为了可视化好看。。。
+            dis_threshold = 20
+            if abs(flow[row, col, 0]) < dis_threshold and abs(flow[row, col, 1]) < dis_threshold:
+                cv2.line(rgb, start_point, end_point, color)
+                cv2.arrowedLine(rgb, start_point, end_point, color)
+            cv2.circle(rgb, start_point, 1, color)
+    cv2.imshow('draw_arrow_flow', rgb)
+    cv2.imwrite(test_arrow_dir + '/arrow_' + str(name_idx) + '.jpg', rgb)
 
 
 def validate(test_loader, model, epoch, output_writers):
@@ -173,8 +297,16 @@ def validate(test_loader, model, epoch, output_writers):
     batch_size_v = 4
     sp_threshold = 0.75
 
+    end = time.time()
+    batch_time = AverageMeter()
+    AEE_sum = 0.
+    AEE_sum_sum = 0.
+    AEE_sum_gt = 0.
+    AEE_sum_sum_gt = 0.
+    percent_AEE_sum = 0.
     iters = 0.
     scale = 1
+    n_points = 0
 
     # 0 is start location
     for i, data in enumerate(test_loader, 0):
@@ -210,11 +342,16 @@ def validate(test_loader, model, epoch, output_writers):
                                             interpolation=cv2.INTER_LINEAR)
             # 0 x direction; 1 y direction
             # 在这里直接save或者可视化
+            gray_file = os.path.join(testdir, 'gray_data', str(i) + '.npy')
+            img = np.load(gray_file)
+            # 普通可视化
+            drawOptFlowMap(flow=pred_flow, img=img, step=20, color=(0, 255, 0), name_idx=i)
+            # 色彩图可视化
 
             #   ----------- Visualization
+            # epoch = -1
             if epoch < 0:
-                pass
-            #     # 1 256 256 5 mask_temp
+                #     # 1 256 256 5 mask_temp
                 mask_temp = former_inputs_on + latter_inputs_on
                 mask_temp = torch.sum(torch.sum(mask_temp, 0), 2)
                 mask_temp_np = np.squeeze(np.array(mask_temp)) > 0
@@ -236,28 +373,61 @@ def validate(test_loader, model, epoch, output_writers):
                                     interpolation=cv2.INTER_LINEAR)
                 y_flow = cv2.resize(np.array(out_temp[0, 1, :, :]), (scale * image_resize, scale * image_resize),
                                     interpolation=cv2.INTER_LINEAR)
-            #     # 炫彩光流图
-            #     flow_rgb = flow_viz_np(x_flow, y_flow)
-            #     if args.render:
-            #         cv2.imshow('Predicted Flow Output', cv2.cvtColor(flow_rgb, cv2.COLOR_BGR2RGB))
-            #
-            #     gt_flow_x = cv2.resize(gt_flow[:, :, 0], (scale * image_resize, scale * image_resize),
-            #                            interpolation=cv2.INTER_LINEAR)
-            #     gt_flow_y = cv2.resize(gt_flow[:, :, 1], (scale * image_resize, scale * image_resize),
-            #                            interpolation=cv2.INTER_LINEAR)
+                #     # 炫彩光流图
+                flow_rgb = flow_viz_np(x_flow, y_flow)
+                if args.render:
+                    cv2.imshow('Predicted Flow Output', cv2.cvtColor(flow_rgb, cv2.COLOR_BGR2RGB))
+                # cv2.imwrite(r'ffff/flow' + str(i) + '.jpg', flow_rgb)
+                cv2.imwrite(os.path.join(test_color_dir, 'color_' + str(i) + '.jpg'), flow_rgb)
+                #
+                #     gt_flow_x = cv2.resize(gt_flow[:, :, 0], (scale * image_resize, scale * image_resize),
+                #                            interpolation=cv2.INTER_LINEAR)
+                #     gt_flow_y = cv2.resize(gt_flow[:, :, 1], (scale * image_resize, scale * image_resize),
+                #                            interpolation=cv2.INTER_LINEAR)
 
-            #     # mask_tmp_np就是把所有产生事件的位置置为1了
-            #     masked_x_flow = cv2.resize(np.array(out_temp[0, 0, :, :] * mask_temp_np),
-            #                                (scale * image_resize, scale * image_resize), interpolation=cv2.INTER_LINEAR)
-            #     masked_y_flow = cv2.resize(np.array(out_temp[0, 1, :, :] * mask_temp_np),
-            #                                (scale * image_resize, scale * image_resize), interpolation=cv2.INTER_LINEAR)
-            #     # 炫彩mask_pred_flow
-            #     flow_rgb_masked = flow_viz_np(masked_x_flow, masked_y_flow)
-            #     if args.render:
-            #         cv2.imshow('Masked Predicted Flow', cv2.cvtColor(flow_rgb_masked, cv2.COLOR_BGR2RGB))
-            #
-            #
+                #     # mask_tmp_np就是把所有产生事件的位置置为1了
+                #     masked_x_flow = cv2.resize(np.array(out_temp[0, 0, :, :] * mask_temp_np),
+                #                                (scale * image_resize, scale * image_resize), interpolation=cv2.INTER_LINEAR)
+                #     masked_y_flow = cv2.resize(np.array(out_temp[0, 1, :, :] * mask_temp_np),
+                #                                (scale * image_resize, scale * image_resize), interpolation=cv2.INTER_LINEAR)
+                #     # 炫彩mask_pred_flow
+                #     flow_rgb_masked = flow_viz_np(masked_x_flow, masked_y_flow)
+                #     if args.render:
+                #         cv2.imshow('Masked Predicted Flow', cv2.cvtColor(flow_rgb_masked, cv2.COLOR_BGR2RGB))
                 cv2.waitKey(1)
+
+            if i > 1:
+                # 计算误差部分
+                # 这里直接调用opencv去获取他的gt_flow
+                # gt_flow = np.zeros((260, 346, 2))
+                gt_flow = np.load('./datasets/celex_datasets/encoded_data/' + testenv + '/gt_flow_data/' + str(i) + '.npy')
+                image_size = pred_flow.shape
+                full_size = gt_flow.shape
+                xsize = full_size[1]
+                ysize = full_size[0]
+                xcrop = image_size[1]
+                ycrop = image_size[0]
+                xoff = (xsize - xcrop) // 2
+                yoff = (ysize - ycrop) // 2
+
+                gt_flow = gt_flow[yoff:-yoff, xoff:-xoff, :]
+
+                AEE, percent_AEE, n_points, AEE_sum_temp, AEE_gt, AEE_sum_temp_gt = \
+                    flow_error_dense(gt_flow, pred_flow,
+                                     (torch.sum(torch.sum(torch.sum(input_representation, dim=0), dim=0), dim=2)).cpu(),
+                                     is_car=False)
+
+                AEE_sum = AEE_sum + args.div_flow * AEE
+                AEE_sum_sum = AEE_sum_sum + AEE_sum_temp
+
+                AEE_sum_gt = AEE_sum_gt + args.div_flow * AEE_gt
+                AEE_sum_sum_gt = AEE_sum_sum_gt + AEE_sum_temp_gt
+
+                percent_AEE_sum += percent_AEE
+
+            # measure elapsed time
+            batch_time.update(time.time() - end)
+            end = time.time()
 
             if i < len(output_writers):  # log first output of first batches
                 output_writers[i].add_image('FlowNet Outputs', flow2rgb(args.div_flow * output[0], max_value=10), epoch)
@@ -265,74 +435,108 @@ def validate(test_loader, model, epoch, output_writers):
             iters += 1
     # 这个n_points好像有点问题啊，这样一来不是只计算最后的了吗
     print('-------------------------------------------------------')
+    print('Mean AEE: {:.2f}, sum AEE: {:.2f}, Mean AEE_gt: {:.2f}, sum AEE_gt: {:.2f}, mean %AEE: {:.2f}, # pts: {:.2f}'
+          .format(AEE_sum / iters, AEE_sum_sum / iters, AEE_sum_gt / iters, AEE_sum_sum_gt / iters,
+                  percent_AEE_sum / iters, n_points))
     print('-------------------------------------------------------')
 
-    return
+    return AEE_sum / iters
 
 
-def celexEncode():
-    print('----> encoding celex data <----')
+def train(train_loader, model, optimizer, epoch, train_writer):
+    global n_iter, args, event_interval, image_resize, sp_threshold
+    batch_time = AverageMeter()
+    data_time = AverageMeter()
+    losses = AverageMeter()
 
-    count_dir = os.path.join(testdir, 'count_data')
-    if not os.path.exists(count_dir):
-        os.makedirs(count_dir)
-    gray_dir = os.path.join(testdir, 'gray_data')
-    if not os.path.exists(gray_dir):
-        os.makedirs(gray_dir)
+    # switch to train mode
+    model.train()
+    end = time.time()
+    # batch_size is 8
+    mini_batch_size_v = args.batch_size
+    batch_size_v = 4
+    sp_threshold = 0.75
 
-    with open(testfile) as f:
-        lines = f.readlines()
+    for ww, data in enumerate(train_loader, 0):
+        # get the inputs
+        # 前四个编码8*256*256*5  后两个灰度8*1*256*256; batch是8，在load时期设置的
+        former_inputs_on, former_inputs_off, latter_inputs_on, latter_inputs_off, former_gray, latter_gray = data
 
-    data_split = 10
+        # 两张灰度图之间有事件，才进行操作
+        if torch.sum(former_inputs_on + former_inputs_off) > 0:
+            # input torch.Size([8, 4, 256, 256, 5])
+            input_representation = torch.zeros(former_inputs_on.size(0), batch_size_v, image_resize, image_resize,
+                                               former_inputs_on.size(3)).float()
 
-    # split in 30 ms, 整体做分割
-    # frame_dates[frame10[frame_single,],...]
-    frame_cnt = 1
-    frame_dates = []
-    cur_frame10 = []
-    cur_frame_single = []
-    for line in lines:
-        if line[2] < 3000 * frame_cnt:
-            # if line[2]<30000*(frame-1)+
-            cur_frame_single.append(line)
-        else:
-            cur_frame10.append(cur_frame_single)
-            # frame_dates.append(cur_frame10)
-            cur_frame_single.clear()
-            cur_frame_single.append(line)
-            frame_cnt += 1
-        if len(cur_frame10) == 10:
-            frame_dates.append(cur_frame10)
-            cur_frame10.clear()
+            # 所谓4通道
+            for b in range(batch_size_v):
+                if b == 0:
+                    input_representation[:, 0, :, :, :] = former_inputs_on
+                elif b == 1:
+                    input_representation[:, 1, :, :, :] = former_inputs_off
+                elif b == 2:
+                    input_representation[:, 2, :, :, :] = latter_inputs_on
+                elif b == 3:
+                    input_representation[:, 3, :, :, :] = latter_inputs_off
 
-    data_cnt = 0
-    # frame_data include n frame
-    # frame include 10 data,
-    # every data is 3 ms
-    for frame in frame_dates:
-        cur_mat_10 = np.zeros((2, 800, 1280, data_split))
-        min_t = frame[0][2]
-        max_t = frame[-1][2]
-        # update event cnt and latest time
-        # cur_mat=np.zeros(2,800,1280)
-        for idx, data in enumerate(frame):
-            for p in data:
-                cur_mat_10[0][p[0]][p[1]][idx] += 1
-                cur_mat_10[1][p[0]][p[1]][idx] = (p[2] - min_t) / (max_t - min_t)
-        np.save(os.path.join(count_dir, str(data_cnt)), cur_mat_10)
+            # measure data loading time
+            data_time.update(time.time() - end)
 
-        bin_img = np.sum(cur_mat_10[1], axis=2)
-        np.save(os.path.join(gray_dir, str(data_cnt)), bin_img)
-        data_cnt += 1
+            # compute output
+            input_representation = input_representation.to(device)
+            # print('hhh')
+            # 执行20次NNforward，
+            # 输出是flow1 ~ flow4
+            # output tuple(8*2*256*256,8*2*128*128,8*2*64*64,8*2*32*32)
+            output = model(input_representation.type(torch.cuda.FloatTensor), image_resize, sp_threshold)
+            # print('jjj')
+
+            # Photometric loss.
+            # 这里做了修改
+            photometric_loss = celex_compute_photometric_loss(former_gray[:, 0, :, :], latter_gray[:, 0, :, :],
+                                                              torch.sum(input_representation, 4), output,
+                                                              weights=args.multiscale_weights)
+
+            # Smoothness loss.
+            smoothness_loss = smooth_loss(output)
+
+            # total_loss
+            loss = photometric_loss + 10 * smoothness_loss
+
+            # 这块已经看不懂了
+            # 先将梯度归零（optimizer.zero_grad()），
+            # 然后反向传播计算得到每个参数的梯度值（loss.backward()），
+            # 最后通过梯度下降执行一步参数更新（optimizer.step()）
+            # compute gradient and do optimization step
+            optimizer.zero_grad()
+            # 15次backward
+            loss.backward()
+            optimizer.step()
+
+            # record loss and EPE
+            train_writer.add_scalar('train_loss', loss.item(), n_iter)
+            losses.update(loss.item(), input_representation.size(0))
+
+            # measure elapsed time
+            batch_time.update(time.time() - end)
+            end = time.time()
+
+            if mini_batch_size_v * ww % args.print_freq < mini_batch_size_v:
+                print('Epoch: [{0}][{1}/{2}]    \t Time {3}\t Data {4}\t Loss {5}'
+                      .format(epoch, mini_batch_size_v * ww, mini_batch_size_v * len(train_loader), batch_time,
+                              data_time, losses))
+            n_iter += 1
+
+    return losses.avg
 
 
 def main():
     global args, best_EPE, image_resize, event_interval, spiking_ts, device, sp_threshold
-    if args.celexencode:
-        celexEncode()
-        return
-    if not os.path.exists(test_flow_map_dir):
-        os.makedirs(test_flow_map_dir)
+    if not os.path.exists(test_arrow_dir):
+        os.makedirs(test_arrow_dir)
+
+    if not os.path.exists(test_color_dir):
+        os.makedirs(test_color_dir)
 
     # spikeflownet, adam, 100epochs,epochSize800,8,5e-5
     save_path = '{},{},{}epochs{},b{},lr{}'.format(
@@ -353,7 +557,7 @@ def main():
 
     if not os.path.exists(save_path):
         os.makedirs(save_path)
-#######################################################################
+    #######################################################################
     # 这一步本质就是创建文件夹，后续会有更多操作
     # train_writer = SummaryWriter(os.path.join(save_path, 'train'))
     # test_writer = SummaryWriter(os.path.join(save_path, 'test'))
@@ -362,16 +566,6 @@ def main():
     for i in range(3):
         output_writers.append(SummaryWriter(os.path.join(save_path, 'test', str(i))))
 
-    # Data loading code
-    # torchvison.transforms
-    # co_transform = transforms.Compose([
-    #     transforms.ToPILImage(),
-    #     transforms.RandomHorizontalFlip(0.5),
-    #     transforms.RandomVerticalFlip(0.5),
-    #     transforms.RandomRotation(30),
-    #     transforms.RandomResizedCrop((256, 256), scale=(0.5, 1.0), ratio=(0.75, 1.3333333333333333), interpolation=2),
-    #     transforms.ToTensor(),
-    # ])
     Test_dataset = Test_loading()
     # workers default is 8 make -j8的那个8，wnmd
     test_loader = DataLoader(dataset=Test_dataset,
@@ -380,7 +574,8 @@ def main():
                              num_workers=args.workers)
 
     # create model
-    # args.ptrtrained='./pretrain/checkpoint_dt1.pth.tar'
+    # args.ptrtrained = './pretrain/checkpoint_dt1.pth.tar'
+    # args.ptrtrained = './pretrain/model_best_etet.pth.tar'
     if args.pretrained:
         network_data = torch.load(args.pretrained)
         # args.arch = network_data['arch']
@@ -410,7 +605,7 @@ def main():
     elif args.solver == 'sgd':
         optimizer = torch.optim.SGD(param_groups, args.lr, momentum=args.momentum)
     # sys.exit()
-    args.evaluate = True
+    # args.evaluate = True
     if args.evaluate:
         # 强制之后的内容不进行计算图构建，不追踪梯度
         with torch.no_grad():
@@ -418,6 +613,54 @@ def main():
             validate(test_loader, model, -1, output_writers)
         return
     # ----------------------- line between train and test --------------------------------------------
+    co_transform = transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.RandomHorizontalFlip(0.5),
+        transforms.RandomVerticalFlip(0.5),
+        transforms.RandomRotation(30),
+        transforms.RandomResizedCrop((256, 256), scale=(0.5, 1.0), ratio=(0.75, 1.3333333333333333), interpolation=2),
+        transforms.ToTensor(),
+    ])
+    train_writer = SummaryWriter(os.path.join(save_path, 'train'))
+    test_writer = SummaryWriter(os.path.join(save_path, 'test'))
+
+    Train_dataset = Train_loading(transform=co_transform)
+    train_loader = DataLoader(dataset=Train_dataset,
+                              batch_size=args.batch_size,
+                              shuffle=True,
+                              num_workers=args.workers)
+    # 学习率调整
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones, gamma=0.7)
+
+    # range(0,100)
+    # for epoch in range(5):
+    for epoch in range(args.start_epoch, args.epochs):
+        scheduler.step()
+
+        # train for one epoch
+        # mean_loss update in every epoch
+        train_loss = train(train_loader, model, optimizer, epoch, train_writer)
+        train_writer.add_scalar('mean loss', train_loss, epoch)
+
+        # Test at every 5 epoch during training
+        if (epoch + 1) % args.evaluate_interval == 0:
+            # evaluate on validation set
+            with torch.no_grad():
+                EPE = validate(test_loader, model, epoch, output_writers)
+            test_writer.add_scalar('mean EPE', EPE, epoch)
+
+            if best_EPE < 0:
+                best_EPE = EPE
+
+            is_best = EPE < best_EPE
+            best_EPE = min(EPE, best_EPE)
+            save_checkpoint({
+                'epoch': epoch + 1,
+                'arch': args.arch,
+                'state_dict': model.module.state_dict(),
+                'best_EPE': best_EPE,
+                'div_flow': args.div_flow
+            }, is_best, save_path)
 
 
 if __name__ == '__main__':

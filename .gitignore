@@ -4,6 +4,17 @@
 /datasets/indoor_flying1
 /datasets/outdoor_day2
 /datasets/outdoor_day1
+#/datasets/celex_datasets/*
+#/datasets/celex_datasets/csv_data/*
+#!/datasets/celex_datasets/csv_data/.gitkeep
+
+#/datasets/celex_datasets/encoded_data/*
+#!/datasets/celex_datasets/encoded_data/.gitkeep
+
+#/datasets/celex_datasets/txt_data/*
+#!/datasets/celex_datasets/txt_data/.gitkeep
+
+/LKimg
 *.pth.tar
 celex_*.csv
 celex_*.txt

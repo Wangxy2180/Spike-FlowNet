@@ -85,7 +85,7 @@ class Events(object):
             # 这个gray就是单纯的弄了个save
             np.save(os.path.join(gray_dir, str(i)), gray[i, :, :])
 
-            cv2.imshow(args.save_env,gray[i,:,:])
+            cv2.imshow(args.save_env, gray[i, :, :])
             cv2.waitKey(1)
 
 
@@ -126,5 +126,5 @@ raw_data = None
 print('Encoding complete!')
 #
 for i in range(gray_image.shape[0]):
-    cv2.imshow("123",gray_image[i])
+    cv2.imshow("123", gray_image[i])
     cv2.waitKey(1)

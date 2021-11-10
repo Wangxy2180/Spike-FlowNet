@@ -2,135 +2,173 @@ import sys
 import cv2
 import numpy as np
 import os
-import h5py
 import argparse
 
-parser = argparse.ArgumentParser(description='Spike Encoding')
-parser.add_argument('--save-dir', type=str, default='../datasets', metavar='PARAMS',
-                    help='Main Directory to save all encoding results')
-parser.add_argument('--save-env', type=str, default='indoor_flying4', metavar='PARAMS',
-                    help='Sub-Directory name to save Environment specific encoding results')
-parser.add_argument('--data-path', type=str, default='../datasets/indoor_flying1/indoor_flying1_data.hdf5',
-                    metavar='PARAMS', help='HDF5 datafile path to load raw data from')
-args = parser.parse_args()
-
-save_path = os.path.join(args.save_dir, args.save_env)
-if not os.path.exists(save_path):
-    os.makedirs(save_path)
-
-count_dir = os.path.join(save_path, 'count_data')
-if not os.path.exists(count_dir):
-    os.makedirs(count_dir)
+count_dir = 0
+gray_dir = 0
 
 
-# gray_dir = os.path.join(save_path, 'gray_data')
-# if not os.path.exists(gray_dir):
-#     os.makedirs(gray_dir)
+def config():
+    parser = argparse.ArgumentParser(description='Spike Encoding')
+    parser.add_argument('--save-dir', type=str, default='./datasets/celex_datasets/encoded_data/', metavar='PARAMS',
+                        help='Main Directory to save all encoding results')
+    parser.add_argument('--data-env', type=str, default='celex_b2t', metavar='PARAMS',
+                        help='Sub-Directory name to save Environment specific encoding results')
+    parser.add_argument('--data-path', type=str, default='./datasets/celex_datasets/txt_data/',
+                        metavar='PARAMS', help='txt datafile path to load raw data from')
+    args_ = parser.parse_args()
+    return args_
+
+
+def get_inc_cnt(input_event, time_interval):
+    # 事件增量数据统计
+    # 用来做事件的分割，每个间隔time_interval(us)记录一次当前的事件量
+    # 如[0,100,200,300]这样，其中每个数字代表从起始0时刻算起，一共产生了多少事件
+    # 第i帧事件再序列中的下标是从event_inc_cnt[i]到event_inc_cnt[i+1]
+    # 一定要注意，下边的起始是有点问题的，idx的值有问题，他是25000us之后的一个的下标，不过也不重要
+    event_inc_cnt = [0]
+    st_time = input_event[0][2]
+    for idx, k in enumerate(input_event):
+        if k[2] >= st_time + time_interval:
+            event_inc_cnt.append(idx)
+            st_time = k[2]
+    return event_inc_cnt
 
 
 class Events(object):
-    def __init__(self, num_events, width=346, height=260):
-        self.data = np.rec.array(None, dtype=[('x', np.uint16), ('y', np.uint16), ('p', np.bool_), ('ts', np.float64)],
-                                 shape=(num_events))
+    def __init__(self, events_cnt, width=1280, height=800):
         self.width = width
         self.height = height
+        # 目标宽高
+        self.dst_height = 260
+        self.dst_width = 346
+        # 裁剪的边缘宽度 (1280-1038)/2; (800-780)/2
+        self.x_off = 121
+        self.y_off = 10
 
-    def generate_fimage(self, input_event=0,  image_raw_event_inds_temp=0, image_raw_ts_temp=0, dt_time_temp=0):
-        # print(image_raw_event_inds_temp.shape, image_raw_ts_temp.shape)
-        # 623
-        split_interval = image_raw_ts_temp.shape[0]
+    def generate_fimage(self, input_event, event_cnt_idx, dt_time_temp=1):
+        # 切割除的图片的个数，这里要减1，因为他多了一个0的下标
+        split_cnt = len(event_cnt_idx) - 1
         # N is 5 *  group is 2
         data_split = 10  # N * (number of event frames from each groups)
 
-        # 2 260 346 10 (polar height weight )
-        td_img_c = np.zeros((2, self.height, self.width, data_split), dtype=np.uint8)
-        # td_img_c = np.zeros((2, self.height, self.width, data_split), dtype=float)
-        #
-        # td_img_c_cnt = np.zeros((self.height, self.width, data_split), dtype=np.uint8)
-        # td_img_c_time = np.zeros((self.height, self.width, data_split), dtype=np.float)
-        # td_img_c = np.stack((td_img_c_cnt, td_img_c_time))
+        # 对25ms内的事件进行编码
+        # 2 260 346 10 (polar, height, weight,),2代表的是事件量和时间各一个维度
+        td_img_1280 = np.zeros((2, self.height, self.width, data_split), dtype=np.uint8)
+        # td_img_346 = np.zeros((2, self.dst_height, self.dst_width, data_split), dtype=np.uint8)
 
-        t_index = 0
-        # dt_time_temp is 1; split_interval is 623
-        # i:0~622
-        for i in range(split_interval - (dt_time_temp - 1)):
-            # print(i)
-            # 这个if基本不会有人走
-            if image_raw_event_inds_temp[i - 1] < 0:
-                # print(11111)
-                frame_data = input_event[0:image_raw_event_inds_temp[i + (dt_time_temp - 1)], :]
+        for i in range(split_cnt - (dt_time_temp - 1)):
+            if i % 50 == 0:
+                print(args.data_env, ": {}/{}".format(i, split_cnt))
+            # 这个if基本不会有人走，现在似乎更没有存在的的必要了
+            # if image_raw_event_inds_temp[i - 1] < 0:
+            if event_cnt_idx[i - 1] < 0:
+                frame_data = input_event[0:event_cnt_idx[i + (dt_time_temp - 1)], :]
             else:
-                # image_raw_event_inds_temp 623张图片有623个时间间隔，存放当前时间间隔累加的事件数量
-                # 似乎下边都是从0开始的
-                # 第一次循环，这里绝对是错的，i-1是-1啊
-                # 简单的说，就是从上一帧的最后一个事件到现在这帧
-                # 但是这里时间并不是从第0个开始的，而是从第0个ind对应的事件开始的
-                # 这里是有问题的，第二帧事件因该是108-267，但这里是从107开始的
-                # 那两个+1是我后来加的，修复了这个bug
-                frame_data = input_event[
-                             image_raw_event_inds_temp[i - 1] + 1:image_raw_event_inds_temp[i + (dt_time_temp - 1)] + 1,
-                             :]
-
+                # 把当前帧对应的事件间隔内的事件收集起来
+                frame_data = input_event[event_cnt_idx[i]:event_cnt_idx[i + dt_time_temp], :]
             if frame_data.size > 0:
-                td_img_c.fill(0)
-                # data_split is 10
-                # 遍历十个图像的数据
+                td_img_1280.fill(0)
+                # td_img_346.fill(0)
+                # data_split is 10 遍历并存储十个图像的数据
                 for m in range(data_split):
-                    # 把这个时间段内的 split in 10 part
-                    # vv is size of every part
-                    # 第m个图像的事件遍历
+                    # 把这个时间段内的 split in 10 part; vv is size of every part
                     for vv in range(int(frame_data.shape[0] / data_split)):
                         v = int(frame_data.shape[0] / data_split) * m + vv
-                        # 这里是在做polar的判定 做的是累加
-                        # if frame_data[v, 3].item() == -1:
-                        #     td_img_c[1, frame_data[v, 1].astype(int), frame_data[v, 0].astype(int), m] += 1
-                        # elif frame_data[v, 3].item() == 1:
-                        #     td_img_c[0, frame_data[v, 1].astype(int), frame_data[v, 0].astype(int), m] += 1
-                        if frame_data[v, 3].item() in [1, -1]:
-                            td_img_c[0, frame_data[v, 1].astype(int), frame_data[v, 0].astype(int), m] += 1
-                            min_t = image_raw_ts_temp[i - 1]
-                            max_t = image_raw_ts_temp[i + (dt_time_temp - 1)]
-                            t = (frame_data[v, 2].item() - min_t) / (max_t - min_t)
-                            td_img_c[1, frame_data[v, 1].astype(int), frame_data[v, 0].astype(int), m] = round(t * 255)
+                        # #############################################注意这里要做上下翻转
+                        # e 事件累加 原始数据是xy，目标数据下标height width
+                        td_img_1280[0, 800 - frame_data[v, 1].astype(int) - 1, frame_data[v, 0].astype(int), m] += 1
+                        # t 找最大最小时间，归一化
+                        min_t = input_event[event_cnt_idx[i]][2]
+                        max_t = input_event[event_cnt_idx[i + dt_time_temp]][2]
+                        t = (frame_data[v, 2].item() - min_t) / (max_t - min_t)
+                        td_img_1280[1, frame_data[v, 1].astype(int), frame_data[v, 0].astype(int), m] = round(t * 255)
+                        # ###########################################1038*780 end
+                        # ##########下边是一次性的完成编码工作。***不保证代码没问题***
+                        # if self.y_off < frame_data[v, 1] < self.height - self.y_off and \
+                        #         self.x_off < frame_data[v, 0] < self.width - self.x_off:
+                        #     td_img_c_346[0, (frame_data[v, 1].astype(int) - 10) // 3, (
+                        #                 frame_data[v, 0].astype(int) - 121) // 3, m] += 1
+                        #     # t 找最大最小时间，归一化
+                        #     min_t = input_event[event_cnt_idx[i]][2]
+                        #     max_t = input_event[event_cnt_idx[i + dt_time_temp]][2]
+                        #     t = (frame_data[v, 2].item() - min_t) / (max_t - min_t)
+                        #     td_img_c_346[1, (frame_data[v, 1].astype(int) - 10) // 3, (
+                        #                 frame_data[v, 0].astype(int) - 121) // 3, m] = round(t * 255)
+                        #     # 下边是灰度图的构造
+                        #     gray_346[
+                        #         (frame_data[v, 1].astype(int) - 10) // 3, (frame_data[v, 0].astype(int) - 121) // 3] = 1
+                        # ##########一次性编码 end
+            # 切割 三倍的尺寸 先弄成1038*780，再缩小,
+            td_img_1038 = td_img_1280[:, self.y_off:-self.y_off, self.x_off:-self.x_off, :]
+            # 这里做一个resize，这直接resize会不会更快一些,现在这样实在是太慢了太慢了
+            td_img_346 = np.zeros((2, self.dst_height, self.dst_width, data_split), dtype=np.uint8)
+            for idx in range(data_split):
+                for row in range(self.dst_height):
+                    for col in range(self.dst_width):
+                        # 做一个sum去噪，否则几乎所的地方都会有1的事件量(噪声),!!这个数调不好啊，只能设小一点1了
+                        # 可调这个值，大于等于几，事件数量大于这个值才进行计算，如果不符合那就是默认的0了
+                        if np.sum(td_img_1038[0, row * 3: row * 3 + 3, col * 3:col * 3 + 3, :]) >= 2:
+                            # if True:
+                            # 可修改为max sum mean，似乎max是比较好的选择，平均至少每个点出现一个事件，才是有效的
+                            td_img_346[0, row, col, idx] = np.max(
+                                td_img_1038[0, row * 3: row * 3 + 3, col * 3:col * 3 + 3, idx])
+                            td_img_346[1, row, col, idx] = np.max(
+                                td_img_1038[1, row * 3: row * 3 + 3, col * 3:col * 3 + 3, idx])
+            np.save(os.path.join(count_dir, str(i)), td_img_346)
 
-            t_index = t_index + 1
+            # #############灰度图制作 start####################
+            # 4是试出来的(3,25ms,max);(0.2,25ms,mean),不需要经常更新，需要的时候uncomment就行
+            gray_346 = np.zeros((self.dst_height, self.dst_width), dtype=np.uint8)
+            for row in range(self.dst_height):
+                for col in range(self.dst_width):
+                    gray_346[row, col] = 255 if np.sum(td_img_346[0, row, col, :]) > 2 else 0
+            np.save(os.path.join(gray_dir, str(i)), gray_346)
+            cv2.imwrite(os.path.join(gray_dir, str(i) + '.jpg'), gray_346)
+            # #############灰度图制作 end####################
 
-            np.save(os.path.join(count_dir, str(i)), td_img_c)
-            # 这个gray就是单纯的弄了个save
+            cv2.imshow(args.data_env, gray_346)
+            cv2.waitKey(1)
 
 
+def main(args__):
+    # 首先在这里读取文件，包括像素点和时间(微秒)
+    # lines = []
+    events = []
+    data_path = os.path.join(args__.data_path, args__.data_env + '.txt')
+    with open(data_path, 'r') as f:
+        lines = f.readlines()
+    for line in lines:
+        x = line.split()
+        # (x,y,t)(col,row,t)
+        events.append([eval(x[0]), eval(x[1]), eval(x[2])])
 
-# indoor_flying1_data.hdf5
-d_set = h5py.File(args.data_path, 'r')
+    # 对应论文中的步长 这个应该还能取值4吧
+    dt_time = 1
+    # 根据时间做分割，单位是微秒
+    event_cnt_idx = get_inc_cnt(events, 25000)
 
-# size is
-# raw data(8024748, 4)
-# image raw ind <HDF5 dataset "image_raw_event_inds": shape (623,), type "<i8">
-# image raw  ts (623,)
+    td = Events(len(events))
+    events = np.array(events)
+    # 开始编码
+    td.generate_fimage(input_event=events, event_cnt_idx=event_cnt_idx, dt_time_temp=dt_time)
 
-# xytp
-raw_data = d_set['davis']['left']['events']
-# 这个里边是每个灰度图对应的事件序号吗？，最大值8024747 事件数量是8024748
-image_raw_event_inds = d_set['davis']['left']['image_raw_event_inds']
-image_raw_ts = np.float64(d_set['davis']['left']['image_raw_ts'])
-d_set = None
+    print('Encoding complete!')
 
-# 第一个ts对应事件107附近，他是怎么做的这个呢
 
-# 这个应该还能取值4吧
-dt_time = 1
+if __name__ == '__main__':
+    args = config()
 
-print('raw data shape', raw_data.shape)
-print('image raw ind', image_raw_event_inds)
-print('image raw ts', image_raw_ts.shape)
-# sys.exit()
-# shape[0] is num_events
-td = Events(raw_data.shape[0])
-# Events
-td.generate_fimage(input_event=raw_data, image_raw_event_inds_temp=image_raw_event_inds,
-                   image_raw_ts_temp=image_raw_ts, dt_time_temp=dt_time)
-raw_data = None
+    save_path = os.path.join(args.save_dir, args.data_env)
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
 
-print('Encoding complete!')
-#
+    count_dir = os.path.join(save_path, 'count_data')
+    if not os.path.exists(count_dir):
+        os.makedirs(count_dir)
 
+    gray_dir = os.path.join(save_path, 'gray_data')
+    if not os.path.exists(gray_dir):
+        os.makedirs(gray_dir)
+
+    main(args)
