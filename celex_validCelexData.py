@@ -87,13 +87,18 @@ event_interval = 0
 spiking_ts = 1
 sp_threshold = 0
 
-# testenv = 'celex_l2r'
-# testenv = 'celex_r2l'
-# testenv = 'walk2'
-testenv = 'walk'
+testenv = 'polygon_multi_cameradynamic'  # polygon_3
+# testenv = 'left_right'
+# testenv = 'polygon_cameradynamic'  # polygon_2
+# testenv = '6dof_sort'
+# testenv = 'jiayou'
+# testenv = 'celex_b2t'
+# testenv = 'walk'  # 就是walk_test
+# testenv='polygon_camerastatic'  # polygon_1
+# testenv='slider_rotation'
 testdir = os.path.join(args.data, testenv)
-test_arrow_dir = os.path.join(testdir, 'arrow_flow')
-test_color_dir = os.path.join(testdir, 'color_flow')
+test_arrow_dir = os.path.join(testdir, 'pred_arrow_flow')
+test_color_dir = os.path.join(testdir, 'pred_color_flow')
 
 # data到encode文件夹
 trainenv = 'walk2'
@@ -296,6 +301,7 @@ def validate(test_loader, model, epoch, output_writers):
 
     batch_size_v = 4
     sp_threshold = 0.75
+    sp_threshold = 1.0
 
     end = time.time()
     batch_time = AverageMeter()
@@ -400,7 +406,8 @@ def validate(test_loader, model, epoch, output_writers):
                 # 计算误差部分
                 # 这里直接调用opencv去获取他的gt_flow
                 # gt_flow = np.zeros((260, 346, 2))
-                gt_flow = np.load('./datasets/celex_datasets/encoded_data/' + testenv + '/gt_flow_data/' + str(i) + '.npy')
+                gt_flow = np.load(
+                    './datasets/celex_datasets/encoded_data/' + testenv + '/gt_flow_data/' + str(i) + '.npy')
                 image_size = pred_flow.shape
                 full_size = gt_flow.shape
                 xsize = full_size[1]
@@ -576,7 +583,9 @@ def main():
     # create model
     # args.ptrtrained = './pretrain/checkpoint_dt1.pth.tar'
     # args.ptrtrained = './pretrain/model_best_etet.pth.tar'
+    args.ptrtrained = './pretrain/celex_10000epochs.pth.tar'
     if args.pretrained:
+        # print(os.getcwd())
         network_data = torch.load(args.pretrained)
         # args.arch = network_data['arch']
         print("=> using pre-trained model '{}'".format(args.arch))
@@ -605,7 +614,7 @@ def main():
     elif args.solver == 'sgd':
         optimizer = torch.optim.SGD(param_groups, args.lr, momentum=args.momentum)
     # sys.exit()
-    # args.evaluate = True
+    args.evaluate = True
     if args.evaluate:
         # 强制之后的内容不进行计算图构建，不追踪梯度
         with torch.no_grad():

@@ -91,9 +91,9 @@ trainenv = 'outdoor_day2'
 # trainenv = 'indoor_flying4'
 # trainenv = 'indoor_flying1'
 
-testenv = 'indoor_flying1'
+# testenv = 'indoor_flying1'
 # testenv = 'indoor_flying2'
-# testenv = 'indoor_flying4'
+testenv = 'indoor_flying3'
 
 traindir = os.path.join(args.data, trainenv)
 testdir = os.path.join(args.data, testenv)

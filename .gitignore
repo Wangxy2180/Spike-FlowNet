@@ -14,6 +14,8 @@
 #/datasets/celex_datasets/txt_data/*
 #!/datasets/celex_datasets/txt_data/.gitkeep
 
+datasets
+
 /LKimg
 *.pth.tar
 celex_*.csv

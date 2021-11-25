@@ -2,11 +2,40 @@
 !!!注意一下td_img_c的xy问题
 
 # Usage
-1. 再使用`/encoding/split_coding_etet.py`对数据集进行etet的编码的工作(celex可以使用的个数)。
-2. 再使用正常的训练方法进行训练，即可训练出一个etet格式的模型。
-3. 先使用`csv2txt.py`将celex数据进行转换成按时间排序的事件流数据
-4. 再使用`celex_encode2etet_resize.py`对celex数据进行etet编码，基本和普通的etet一样，就是把输入改成了celex的输入并resize到346\*260(因为这个尺寸的数据与原始代码中的处理是一致的，所以后续就可以较少改动)(先从1280\*800->1038\*780，再从1038\*780->346\*260)
-5. 最后使用`validCelexData.py`进行celex数据的可视化工作
+
+1. 首先使用CeleX-V事件相机的可视化Demo进行数据采集，使用内部时间戳模式。并将bin文件转换为csv文件。
+
+2. 使用`celex_csv2txt.py`，将csv数据进行内部时间戳排序，并转换为txt格式。
+
+   ```
+   python celex_csv2txt.py --file_path='path/to/celex_data.csv'
+   ```
+
+   > 注意，对于一些较大的csv数据，可能会爆内存，应该是因为python内部排序算法的空间复杂度所导致，可以自己写一个O(1)的排序（我没验证是否可行），或者再windows上用“Data.ollo_version_3.1”进行排序处理，然后用vim删掉多余的行，再使用`celex_csv2txt_nosort.py`即可。
+
+3. 使用`celex_encode2etet_resize.py`对事件数据进行etet编码，并将其resize为346*260，输出count数据和gray数据。
+
+   ```
+   python celex_encode2etet_ersize.py --data-env=your_data_name
+   ```
+
+4. 使用`celex_generate_gt_flow.py`对测试数据集进行gt光流生成。
+
+   ```
+   python celex_generate_gt_flow.py --data-env=your_data_name
+   ```
+
+5. 使用`celex_validCelexData.py`进行训练或测试。
+
+   训练：`python celex_validCelexData.py`
+
+   测试：`python celex_validCelexData.py --evaluate --pretrained='checkpoint_path'`
+
+
+
+
+
+# Usage
 
 `/encoding/celex_encode2etet_resize.py`，对事件进行etet编码，其中是按照1+6组合的方式编码的，并将时间统一缩放到0~255,然后resize到346\*260
 
@@ -19,4 +48,5 @@
 
 
 
-`celex_loss.py`这里修改了一个loss的计算方法，即`range_loss`，普通loss是单个相减，我们这个是一个范围的相减计算，因为他毕竟是二值图吗，所以有时单个像素看不出啥
+`celex_loss.py`这里修改了一个loss的计算方法，即`patch_loss`，普通loss是单个相减，我们这个是一个范围的相减计算，因为他毕竟是二值图吗，所以有时单个像素看不出啥
+

@@ -90,6 +90,9 @@ class FlowNetS_spike(nn.Module):
         self.upsampled_flow1_to_0 = nn.ConvTranspose2d(in_channels=68 + 2, out_channels=32, kernel_size=4, stride=2,
                                                        padding=1, bias=False)
 
+        self.spike_sum = 0
+        self.pixel_total = 0
+
         # 这是干嘛呢,而且这俩看上去一样啊
         for m in self.modules():
             # print('modules',m)
@@ -141,6 +144,10 @@ class FlowNetS_spike(nn.Module):
             # 输入：累加的膜电位和阈值
             # 输出：更新后的膜电位(产生脉冲的位置reset 0)和本层产生的脉冲
             mem_1, out_conv1 = IF_Neuron(mem_1, threshold)
+            # 这里计算一下激发的脉冲的数量除以整个的大小
+            # 他应该是个三维的吧 放下边统一算
+            # self.spike_sum += torch.sum(out_conv1)
+            # self.pixel_total += out_conv1.shape[1] * out_conv1.shape[2] * out_conv1.shape[3]
 
             current_2 = self.conv2(out_conv1)
             mem_2 = mem_2 + current_2
@@ -156,6 +163,18 @@ class FlowNetS_spike(nn.Module):
             mem_4 = mem_4 + current_4
             mem_4_total = mem_4_total + current_4
             mem_4, out_conv4 = IF_Neuron(mem_4, threshold)
+
+            self.spike_sum += torch.sum(out_conv1)
+            self.pixel_total += out_conv1.shape[1] * out_conv1.shape[2] * out_conv1.shape[3]
+            self.spike_sum += torch.sum(out_conv2)
+            self.pixel_total += out_conv2.shape[1] * out_conv2.shape[2] * out_conv2.shape[3]
+            self.spike_sum += torch.sum(out_conv3)
+            self.pixel_total += out_conv3.shape[1] * out_conv3.shape[2] * out_conv3.shape[3]
+            self.spike_sum += torch.sum(out_conv4)
+            self.pixel_total += out_conv4.shape[1] * out_conv4.shape[2] * out_conv4.shape[3]
+        print("activity is    : ", self.spike_sum / self.pixel_total)
+        # print("spike_sum is   : ", self.spike_sum)
+        # print("pixel_total is : ", self.pixel_total)
 
         # 这三个应该是SNN部分那三个绿线残差
         mem_4_residual = 0

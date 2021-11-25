@@ -160,32 +160,36 @@ def flow_error_dense(flow_gt, flow_pred, event_img, is_car=False):
     if is_car == True:
         max_row = 190
 
+    # flow_pred:(256,256,2);event_img(256,256)
     flow_pred = np.array(flow_pred)
     event_img = np.array(event_img)
 
+    # 还是原来的尺寸没变
     event_img_cropped = np.squeeze(event_img)[:max_row, :]
     flow_gt_cropped = flow_gt[:max_row, :]
     flow_pred_cropped = flow_pred[:max_row, :]
 
-    # 出现事件才为1的mask
+    # 出现事件才为1的mask(256,256)
     event_mask = event_img_cropped > 0
 
     # Only compute error over points that are valid in the GT (not inf or 0).
-    # 某点xy均为有效数值,且范数大于0，flow_mask才为1
+    # 某点xy均为有效数值,且范数大于0(应该就是x^2+y^2>0的意思，至少有一个不为0)，flow_mask才为1
     # 范数的特殊含义是啥呢
-    # flow_mask 256*256
+    # flow_mask 256*256,里边的3个也全是256*256
     flow_mask = np.logical_and(np.logical_and(~np.isinf(flow_gt_cropped[:, :, 0]), ~np.isinf(flow_gt_cropped[:, :, 1])),
                                np.linalg.norm(flow_gt_cropped, axis=2) > 0)
-    # 光流值存在，且该点也触发了事件
+    # 光流值存在，且该点也触发了事件 total_mask(256*256)
     total_mask = np.squeeze(np.logical_and(event_mask, flow_mask))
-    # 这两个mask，15*2；这个方法真神奇啊
+    # 这两个mask，15*2；这个方法真神奇啊,好像是把他x，y各拉成一维的了
+    # 当total_mask对应位置为true时这个数据才会被拉成一维
     gt_masked = flow_gt_cropped[total_mask, :]
     pred_masked = flow_pred_cropped[total_mask, :]
 
     # EE_gt是要干啥呢
+    # 这俩尺寸都是(1425*1)
     EE = np.linalg.norm(gt_masked - pred_masked, axis=-1)
     EE_gt = np.linalg.norm(gt_masked, axis=-1)
-
+    # gt和pred同事都存在光流的点的数量
     n_points = EE.shape[0]
 
     # Percentage of points with EE < 3 pixels.

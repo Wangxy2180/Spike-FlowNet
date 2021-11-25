@@ -4,13 +4,23 @@ import numpy as np
 def norm_test():
     # 所有数的平方相加再开根号
     a = np.array([[2, 2]])
-    print('norm_test:', np.linalg.norm(a))
+    print('norm_test(2*1* ):', np.linalg.norm(a))
 
-    a = np.array([[2, 2], [1, 1]])
-    print('norm_test:', np.linalg.norm(a))
+    a = np.array([[2, 2, 2], [1, 1, 1]])
+    print('norm_test(2*2  ):', np.linalg.norm(a, axis=-1))
 
-    a = np.array([[[2, 2], [1, 1]]])
-    print('norm_test:', np.linalg.norm(a, axis=-1))
+    a = np.array([[[0, 1], [2, 3]], [[4, 5], [6, 7]]])
+    # print(a.shape)
+    print('norm_test(2*2*2):', np.linalg.norm(a, axis=2))
+
+
+def colon_test():
+    a = np.array([[1, 2, 3],
+                  [4, 5, 6],
+                  [7, 8, 9]])
+    bool_a = np.squeeze(a > 3)
+    print(bool_a)
+    print(a[bool_a])
 
 
 def load_npy():
@@ -38,7 +48,8 @@ def maohao_test():
 
 def main():
     # norm_test()
-    load_npy()
+    colon_test()
+    # load_npy()
     # compare_test()
     # maohao_test()
 

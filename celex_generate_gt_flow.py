@@ -2,6 +2,7 @@ import argparse
 import numpy as np
 import os
 import cv2
+from vis_utils import flow_viz_np
 
 
 # 根据灰度图创建gt信息
@@ -28,13 +29,13 @@ def drawOptFlowMap(flow, img, step, color, save_path):
             cv2.circle(rgb, start_point, 1, color)
     cv2.imshow('celex', rgb)
     cv2.waitKey(30)
-    cv2.imwrite(str(save_path) + '.jpg', rgb)
+    cv2.imwrite(str(save_path), rgb)
 
 
 def config():
     parser = argparse.ArgumentParser(description='celex in pixel csv data to (x,y,t) txt data')
-    parser.add_argument('--data_path', type=str, default='./datasets/celex_datasets/encoded_data')
-    parser.add_argument('--data_env', type=str, default='walk')
+    parser.add_argument('--data-path', type=str, default='./datasets/celex_datasets/encoded_data')
+    parser.add_argument('--data-env', type=str, default='walk')
     args = parser.parse_args()
     return args
 
@@ -42,9 +43,13 @@ def config():
 def main():
     args = config()
     data_folder = os.path.join(args.data_path, args.data_env, 'gray_data')
-    save_folder = os.path.join(args.data_path, args.data_env, 'gt_flow_data')
-    if not os.path.exists(save_folder):
-        os.makedirs(save_folder)
+    arrow_save_folder = os.path.join(args.data_path, args.data_env, 'gt_flow_data')
+    color_save_folder = os.path.join(args.data_path, args.data_env, 'gt_flow_color_data')
+    if not os.path.exists(arrow_save_folder):
+        os.makedirs(arrow_save_folder)
+
+    if not os.path.exists(color_save_folder):
+        os.makedirs(color_save_folder)
 
     curr_img = 0
     prev_img = 0
@@ -54,8 +59,11 @@ def main():
         if i > 1:
             flow = cv2.calcOpticalFlowFarneback(prev_img, curr_img, None, 0.5, 3, 15, 3, 5, 1.2, 0)
             # 保存的序号是当前帧的序号，存的是从上一帧到当前帧的光流
-            drawOptFlowMap(flow, prev_img, 8, (0, 255, 0), os.path.join(save_folder, str(i) + '.jpg'))
-            np.save(os.path.join(save_folder, str(i)), flow)
+            drawOptFlowMap(flow, prev_img, 8, (0, 255, 0), os.path.join(arrow_save_folder, str(i) + '.jpg'))
+            np.save(os.path.join(arrow_save_folder, str(i)), flow)
+            rgb_flow_img = flow_viz_np(flow[:, :, 0], flow[:, :, 1])
+            cv2.imwrite(os.path.join(color_save_folder, str(i) + '.jpg'),
+                        rgb_flow_img)
         prev_img = curr_img
 
 
