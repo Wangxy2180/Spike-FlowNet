@@ -1,0 +1,8 @@
+1
+spin_fast,0.0358
+spin_mid,0.0336
+spin_slow,0.0279
+spin_slow_mid,0.0306
+spin_static,0.018
+spin_vf,0.0364
+spin_vs,0.0235
